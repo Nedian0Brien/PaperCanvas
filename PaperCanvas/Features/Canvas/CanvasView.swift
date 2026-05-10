@@ -14,10 +14,13 @@ struct CanvasView: View {
     var onScrapMoved: ((UUID, CGPoint) -> Void)? = nil
     var onScrapResized: ((UUID, CGSize) -> Void)? = nil
     var onScrapDeleted: ((UUID) -> Void)? = nil
+    var onZoomChanged: ((CGFloat) -> Void)? = nil
+    var onStrokeBegan: (() -> Void)? = nil
+    var onStrokeEnded: (() -> Void)? = nil
 
     var body: some View {
         ZStack {
-            Color(.systemBackground)
+            Color.Surface.paper
             InfiniteCanvasContainer(drawing: $drawing,
                                     contentOffset: $contentOffset,
                                     resetTrigger: $resetTrigger,
@@ -34,15 +37,22 @@ struct CanvasView: View {
                                     onScrapResized: onScrapResized,
                                     onScrapDeleted: onScrapDeleted,
                                     onUndoRedoStateChanged: { canUndo, canRedo in
-                                        palette.mainCanUndo = canUndo
-                                        palette.mainCanRedo = canRedo
+                                        DispatchQueue.main.async {
+                                            palette.mainCanUndo = canUndo
+                                            palette.mainCanRedo = canRedo
+                                        }
                                     },
                                     onMainCanvasActivated: {
-                                        palette.lastActiveCanvas = .main
+                                        DispatchQueue.main.async {
+                                            palette.lastActiveCanvas = .main
+                                        }
                                     },
                                     onPencilTap: {
                                         palette.switchToPreviousTool()
-                                    })
+                                    },
+                                    onZoomChanged: onZoomChanged,
+                                    onStrokeBegan: onStrokeBegan,
+                                    onStrokeEnded: onStrokeEnded)
         }
     }
 }

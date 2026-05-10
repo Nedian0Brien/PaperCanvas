@@ -11,7 +11,7 @@ struct RootSplitView: View {
 
     @State private var pdfDocument: PDFDocument?
     @State private var canvasDrawing = PKDrawing()
-    @State private var pdfInkDrawings: [Int: PKDrawing] = [:]
+    @State private var pdfInkStrokes: [Int: [InkStroke]] = [:]
     @State private var contentOffset: CGPoint = .zero
     @State private var currentPageIndex: Int = 0
     @State private var navigationTarget: PDFNavigationTarget?
@@ -23,6 +23,16 @@ struct RootSplitView: View {
 
     @State private var accessingURL: URL?
     @State private var saveTask: Task<Void, Never>?
+    @State private var saveStatus: SaveStatus = .idle
+    @State private var canvasZoomScale: CGFloat = 1.0
+    @State private var showingPageJumpSheet = false
+    @State private var savedStatusResetTask: Task<Void, Never>?
+    @AppStorage("PaperCanvas.autoHideTopBar") private var autoHideTopBar = false
+
+    private var chromeOpacity: Double {
+        guard palette.isStrokeInProgress else { return 1.0 }
+        return autoHideTopBar ? 0.0 : Motion.dimDuringStrokeOpacity
+    }
 
     private let dividerVisualWidth: CGFloat = 8
     private let dividerHitWidth: CGFloat = 28
@@ -34,59 +44,110 @@ struct RootSplitView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            GeometryReader { geo in
-                let totalWidth = geo.size.width
-                let leftWidth = max(totalWidth * minFraction,
-                                    min(totalWidth * maxFraction,
-                                        totalWidth * leftFraction))
-                let rightWidth = max(0, totalWidth - leftWidth - dividerVisualWidth)
+        GeometryReader { geo in
+            let totalWidth = geo.size.width
+            let leftWidth = max(totalWidth * minFraction,
+                                min(totalWidth * maxFraction,
+                                    totalWidth * leftFraction))
+            let rightWidth = max(0, totalWidth - leftWidth - dividerVisualWidth)
 
-                HStack(spacing: 0) {
-                    leftPane
-                        .frame(width: leftWidth)
+            HStack(spacing: 0) {
+                leftPane
+                    .frame(width: leftWidth)
 
-                    DividerHandle(visualWidth: dividerVisualWidth,
-                                  hitWidth: dividerHitWidth)
-                        .frame(width: dividerHitWidth)
-                        .gesture(dividerDrag(totalWidth: totalWidth))
+                DividerHandle(visualWidth: dividerVisualWidth,
+                              hitWidth: dividerHitWidth)
+                    .frame(width: dividerHitWidth)
+                    .gesture(dividerDrag(totalWidth: totalWidth))
 
-                    ZStack(alignment: .topTrailing) {
-                        CanvasView(drawing: $canvasDrawing,
-                                   contentOffset: $contentOffset,
-                                   resetTrigger: $canvasResetTrigger,
-                                   initialContentSize: CGSize(
-                                       width: paper.canvasContentWidth,
-                                       height: paper.canvasContentHeight),
-                                   scraps: sortedScraps,
-                                   palette: palette,
-                                   background: canvasBackground,
-                                   onScrapTap: handleScrapTap,
-                                   onDrop: handleCanvasDrop,
-                                   onScrapMoved: handleScrapMoved,
-                                   onScrapResized: handleScrapResized,
-                                   onScrapDeleted: handleScrapDeleted)
+                ZStack(alignment: .topTrailing) {
+                    CanvasView(drawing: $canvasDrawing,
+                               contentOffset: $contentOffset,
+                               resetTrigger: $canvasResetTrigger,
+                               initialContentSize: CGSize(
+                                   width: paper.canvasContentWidth,
+                                   height: paper.canvasContentHeight),
+                               scraps: sortedScraps,
+                               palette: palette,
+                               background: canvasBackground,
+                               onScrapTap: handleScrapTap,
+                               onDrop: handleCanvasDrop,
+                               onScrapMoved: handleScrapMoved,
+                               onScrapResized: handleScrapResized,
+                               onScrapDeleted: handleScrapDeleted,
+                               onZoomChanged: { scale in
+                                   canvasZoomScale = scale
+                               },
+                               onStrokeBegan: {
+                                   palette.isStrokeInProgress = true
+                               },
+                               onStrokeEnded: {
+                                   palette.isStrokeInProgress = false
+                               })
 
-                        canvasFloatingControls
-                            .padding(12)
-                    }
-                    .frame(width: rightWidth - (dividerHitWidth - dividerVisualWidth))
+                    canvasFloatingControls
+                        .padding(Spacing.m)
+                        .opacity(chromeOpacity)
+                        .animation(Motion.chromeFade, value: chromeOpacity)
+                        .allowsHitTesting(chromeOpacity > 0.05)
                 }
+                .frame(width: rightWidth - (dividerHitWidth - dividerVisualWidth))
             }
-            .ignoresSafeArea(.keyboard)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                PaletteToolbar(palette: palette)
+        }
+        .ignoresSafeArea(.keyboard)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedTopBar(
+                title: paper.title,
+                palette: palette,
+                onLibraryTap: {
+                    handleDisappear()
+                    dismiss()
+                },
+                pageIndex: currentPageIndex,
+                totalPages: pdfDocument?.pageCount ?? 0,
+                saveStatus: saveStatus,
+                canvasZoom: canvasZoomScale,
+                onPageJumpTap: { showingPageJumpSheet = true },
+                onPreviousPage: handlePreviousPage,
+                onNextPage: handleNextPage,
+                onZoomReset: { canvasResetTrigger = UUID() },
+                debugActions: debugActions,
+                autoHideTopBar: $autoHideTopBar
+            )
+            .padding(.horizontal, TopBarMetrics.outerHorizontalPadding)
+            .padding(.top, TopBarMetrics.outerTopPadding)
+            .padding(.bottom, TopBarMetrics.outerBottomPadding)
+            .opacity(chromeOpacity)
+            .animation(Motion.chromeFade, value: chromeOpacity)
+            .allowsHitTesting(chromeOpacity > 0.05)
+        }
+        .sheet(isPresented: $showingPageJumpSheet) {
+            if let pdfDocument {
+                PageJumpSheet(
+                    pdfDocument: pdfDocument,
+                    currentPageIndex: currentPageIndex,
+                    onSelect: { index in
+                        navigationTarget = PDFNavigationTarget(pageIndex: index, pageRect: .zero)
+                    }
+                )
             }
-            .toolbar { toolbarContent }
-            .navigationTitle(paper.title)
-            .navigationBarTitleDisplayMode(.inline)
         }
         .task { await loadIfNeeded() }
         .onChange(of: canvasDrawing) { _, _ in scheduleSave() }
-        .onChange(of: pdfInkDrawings) { _, _ in scheduleSave() }
+        .onChange(of: pdfInkStrokes) { _, _ in scheduleSave() }
         .onChange(of: contentOffset) { _, _ in scheduleSave() }
         .onChange(of: currentPageIndex) { _, _ in scheduleSave() }
         .onDisappear { handleDisappear() }
+    }
+
+    private func handlePreviousPage() {
+        guard currentPageIndex > 0 else { return }
+        navigationTarget = PDFNavigationTarget(pageIndex: currentPageIndex - 1, pageRect: .zero)
+    }
+
+    private func handleNextPage() {
+        guard let pdfDocument, currentPageIndex < pdfDocument.pageCount - 1 else { return }
+        navigationTarget = PDFNavigationTarget(pageIndex: currentPageIndex + 1, pageRect: .zero)
     }
 
     @ViewBuilder
@@ -95,83 +156,75 @@ struct RootSplitView: View {
             PDFKitView(document: pdfDocument,
                        currentPageIndex: $currentPageIndex,
                        navigationTarget: $navigationTarget,
-                       pageInkDrawings: $pdfInkDrawings,
+                       pageInkStrokes: $pdfInkStrokes,
                        palette: palette,
                        onRegionCaptured: handleRegionCaptured)
         } else if let loadError {
-            VStack(spacing: 12) {
+            VStack(spacing: Spacing.m) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 36))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.Ink.secondary)
                 Text(loadError)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.Ink.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.secondarySystemBackground))
+            .background(Color.Surface.subtle)
         } else {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.secondarySystemBackground))
+                .background(Color.Surface.subtle)
         }
     }
 
     @ViewBuilder
     private var canvasFloatingControls: some View {
-        VStack(spacing: 10) {
-            Button {
-                canvasResetTrigger = UUID()
-            } label: {
-                Image(systemName: "scope")
-                    .font(.title3)
-                    .frame(width: 40, height: 40)
-                    .background(.regularMaterial, in: .circle)
-                    .overlay(Circle().stroke(Color(.separator)))
-            }
-            .accessibilityLabel("캔버스 가운데로")
+        GlassEffectContainer(spacing: Spacing.s) {
+            VStack(spacing: Spacing.s) {
+                Button {
+                    canvasResetTrigger = UUID()
+                } label: {
+                    Image(systemName: "scope")
+                        .font(.title3)
+                        .frame(width: 40, height: 40)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("캔버스 가운데로")
 
-            Menu {
-                ForEach(CanvasBackground.allCases) { type in
-                    Button {
-                        paper.canvasBackgroundRaw = type.rawValue
-                        paper.updatedAt = .now
-                    } label: {
-                        Label(type.label, systemImage: type.systemImage)
-                        if canvasBackground == type {
-                            Image(systemName: "checkmark")
+                Menu {
+                    ForEach(CanvasBackground.allCases) { type in
+                        Button {
+                            paper.canvasBackgroundRaw = type.rawValue
+                            paper.updatedAt = .now
+                        } label: {
+                            Label(type.label, systemImage: type.systemImage)
+                            if canvasBackground == type {
+                                Image(systemName: "checkmark")
+                            }
                         }
                     }
+                } label: {
+                    Image(systemName: canvasBackground.systemImage)
+                        .font(.title3)
+                        .frame(width: 40, height: 40)
                 }
-            } label: {
-                Image(systemName: canvasBackground.systemImage)
-                    .font(.title3)
-                    .frame(width: 40, height: 40)
-                    .background(.regularMaterial, in: .circle)
-                    .overlay(Circle().stroke(Color(.separator)))
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("캔버스 배경")
             }
-            .accessibilityLabel("캔버스 배경")
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.primary)
+        .foregroundStyle(Color.Ink.primary)
     }
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Button {
-                handleDisappear()
-                dismiss()
-            } label: {
-                Label("라이브러리", systemImage: "books.vertical")
-            }
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button("디버그: 텍스트 스크랩 추가") { addDummyTextScrap() }
-                Button("디버그: 이미지 스크랩 추가") { addDummyImageScrap() }
-            } label: {
-                Image(systemName: "wrench.and.screwdriver")
-            }
-        }
+    private var debugActions: UnifiedTopBar.DebugActions? {
+        #if DEBUG
+        UnifiedTopBar.DebugActions(
+            addTextScrap: addDummyTextScrap,
+            addImageScrap: addDummyImageScrap
+        )
+        #else
+        nil
+        #endif
     }
 
     private var sortedScraps: [ScrapItem] {
@@ -272,6 +325,7 @@ struct RootSplitView: View {
         }
     }
 
+    #if DEBUG
     private func addDummyTextScrap() {
         let position = nextDummyPosition()
         let scrap = ScrapItem(
@@ -321,6 +375,7 @@ struct RootSplitView: View {
         let jitter = CGFloat(paper.scrapItems.count % 5) * 24
         return CGPoint(x: baseX + jitter, y: baseY + jitter)
     }
+    #endif
 
     private func dividerDrag(totalWidth: CGFloat) -> some Gesture {
         DragGesture()
@@ -341,7 +396,7 @@ struct RootSplitView: View {
            let drawing = try? PKDrawing(data: data) {
             canvasDrawing = drawing
         }
-        pdfInkDrawings = resolvePageInkDrawings()
+        pdfInkStrokes = resolvePageInkStrokes()
 
         guard let url = resolvePDFURL() else {
             loadError = "PDF를 찾을 수 없습니다"
@@ -379,10 +434,23 @@ struct RootSplitView: View {
     private func scheduleSave() {
         guard didLoad else { return }
         saveTask?.cancel()
+        savedStatusResetTask?.cancel()
+        saveStatus = .saving
         saveTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
             persist()
+            saveStatus = .saved(.now)
+            scheduleSavedStatusReset()
+        }
+    }
+
+    private func scheduleSavedStatusReset() {
+        savedStatusResetTask?.cancel()
+        savedStatusResetTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+            if case .saved = saveStatus { saveStatus = .idle }
         }
     }
 
@@ -396,33 +464,29 @@ struct RootSplitView: View {
         paper.updatedAt = .now
     }
 
-    private func currentPageInkBinding() -> Binding<PKDrawing> {
-        Binding(
-            get: { pdfInkDrawings[currentPageIndex] ?? PKDrawing() },
-            set: { newValue in
-                if newValue.strokes.isEmpty {
-                    pdfInkDrawings.removeValue(forKey: currentPageIndex)
-                } else {
-                    pdfInkDrawings[currentPageIndex] = newValue
+    private func resolvePageInkStrokes() -> [Int: [InkStroke]] {
+        var strokesByPage: [Int: [InkStroke]] = [:]
+        for ink in paper.pageInks {
+            if let strokes = try? JSONDecoder().decode([InkStroke].self, from: ink.drawingData),
+               !strokes.isEmpty {
+                strokesByPage[ink.pageIndex] = strokes
+            } else if let drawing = try? PKDrawing(data: ink.drawingData) {
+                let strokes = PKDrawingConverter.toInkStrokes(drawing)
+                if !strokes.isEmpty {
+                    strokesByPage[ink.pageIndex] = strokes
                 }
             }
-        )
-    }
-
-    private func resolvePageInkDrawings() -> [Int: PKDrawing] {
-        var drawings: [Int: PKDrawing] = [:]
-        for ink in paper.pageInks {
-            if let drawing = try? PKDrawing(data: ink.drawingData) {
-                drawings[ink.pageIndex] = drawing
-            }
         }
-        if drawings.isEmpty,
+        if strokesByPage.isEmpty,
            let data = paper.pdfInkData,
            !data.isEmpty,
            let legacyDrawing = try? PKDrawing(data: data) {
-            drawings[0] = legacyDrawing
+            let strokes = PKDrawingConverter.toInkStrokes(legacyDrawing)
+            if !strokes.isEmpty {
+                strokesByPage[0] = strokes
+            }
         }
-        return drawings
+        return strokesByPage
     }
 
     private func syncPageInkModels() {
@@ -435,13 +499,13 @@ struct RootSplitView: View {
             }
         }
 
-        let activeDrawings = pdfInkDrawings.filter { !$0.value.strokes.isEmpty }
-        for ink in paper.pageInks where activeDrawings[ink.pageIndex] == nil {
+        let activeStrokes = pdfInkStrokes.filter { !$0.value.isEmpty }
+        for ink in paper.pageInks where activeStrokes[ink.pageIndex] == nil {
             modelContext.delete(ink)
         }
 
-        for (pageIndex, drawing) in activeDrawings {
-            let data = drawing.dataRepresentation()
+        for (pageIndex, strokes) in activeStrokes {
+            guard let data = try? JSONEncoder().encode(strokes) else { continue }
             if let ink = existingByPage[pageIndex] {
                 ink.drawingData = data
                 ink.updatedAt = .now
@@ -456,6 +520,7 @@ struct RootSplitView: View {
 
     private func handleDisappear() {
         saveTask?.cancel()
+        savedStatusResetTask?.cancel()
         if didLoad { persist() }
         accessingURL?.stopAccessingSecurityScopedResource()
         accessingURL = nil
@@ -470,11 +535,12 @@ private struct DividerHandle: View {
         ZStack {
             Color.clear
             Rectangle()
-                .fill(Color(.separator))
+                .fill(Color.Rule.hairline)
                 .frame(width: visualWidth)
             Capsule()
-                .fill(Color(.tertiaryLabel))
+                .fill(Color.Ink.tertiary)
                 .frame(width: 3, height: 36)
+                .chromeGlassCapsule()
         }
         .frame(width: hitWidth)
         .contentShape(.rect)

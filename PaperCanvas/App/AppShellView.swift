@@ -57,10 +57,10 @@ private struct SplashView: View {
 
                 VStack(spacing: 6) {
                     Text("PaperCanvas")
-                        .font(.system(size: 28, weight: .semibold, design: .rounded))
+                        .font(AppType.display)
                         .foregroundStyle(.white)
                     Text("논문과 캔버스를 한 화면에")
-                        .font(.subheadline)
+                        .font(AppType.callout)
                         .foregroundStyle(.white.opacity(0.7))
                 }
 

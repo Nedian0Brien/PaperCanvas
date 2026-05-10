@@ -56,10 +56,10 @@ enum ToolKind: String, CaseIterable, Identifiable, Codable {
 
     var widthSteps: [CGFloat] {
         switch self {
-        case .pen:    return [2, 4, 8, 14]
-        case .marker: return [8, 16, 24, 36]
-        case .pencil: return [1, 3, 6, 10]
-        case .eraser: return [10, 20, 35, 55]
+        case .pen:    return [2, 4, 8, 14, 18]
+        case .marker: return [8, 16, 24, 32, 40]
+        case .pencil: return [1, 3, 5, 8, 11]
+        case .eraser: return [10, 20, 32, 44, 56]
         case .lasso:  return [4]
         }
     }
@@ -75,6 +75,82 @@ enum ToolKind: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+enum PenKind: String, CaseIterable, Identifiable, Codable {
+    case ballpoint
+    case gelPen
+    case fountainPen
+    case brushPen
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .ballpoint:   return "볼펜"
+        case .gelPen:      return "젤펜"
+        case .fountainPen: return "만년필"
+        case .brushPen:    return "붓펜"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .ballpoint:   return "applepencil.tip"
+        case .gelPen:      return "scribble.variable"
+        case .fountainPen: return "pencil.tip"
+        case .brushPen:    return "paintbrush.pointed"
+        }
+    }
+
+    var usesCustomToolbarIcon: Bool {
+        self == .fountainPen
+    }
+
+    var inkTool: InkTool {
+        switch self {
+        case .ballpoint:   return .pen
+        case .gelPen:      return .gelPen
+        case .fountainPen: return .fountainPen
+        case .brushPen:    return .brushPen
+        }
+    }
+
+    var defaultWidth: CGFloat {
+        switch self {
+        case .ballpoint:   return 4
+        case .gelPen:      return 4
+        case .fountainPen: return 5
+        case .brushPen:    return 7
+        }
+    }
+
+    var widthRange: ClosedRange<CGFloat> {
+        switch self {
+        case .ballpoint:   return 1...14
+        case .gelPen:      return 1...16
+        case .fountainPen: return 1...18
+        case .brushPen:    return 2...28
+        }
+    }
+
+    var widthSteps: [CGFloat] {
+        switch self {
+        case .ballpoint:   return [2, 4, 7, 10, 13]
+        case .gelPen:      return [2, 4, 8, 12, 15]
+        case .fountainPen: return [2, 5, 9, 13, 17]
+        case .brushPen:    return [4, 7, 14, 21, 27]
+        }
+    }
+
+    var hapticStyle: UIImpactFeedbackGenerator.FeedbackStyle {
+        switch self {
+        case .ballpoint:   return .light
+        case .gelPen:      return .soft
+        case .fountainPen: return .medium
+        case .brushPen:    return .rigid
+        }
+    }
+}
+
 enum ActiveCanvas: String, Codable {
     case main
     case pdfInk
@@ -84,17 +160,29 @@ enum ActiveCanvas: String, Codable {
 @MainActor
 final class PaletteState {
     private static let storeKey = "PaperCanvas.PaletteState.v1"
+    static let defaultPresetColors = Color.defaultPresets
 
     var tool: ToolKind = .pen {
         didSet {
             guard tool != oldValue else { return }
             previousTool = oldValue
-            widths[oldValue] = width
-            width = widths[tool] ?? tool.defaultWidth
+            storeCurrentWidth(for: oldValue)
+            width = currentStoredWidth
             save()
         }
     }
     private(set) var previousTool: ToolKind?
+
+    var penKind: PenKind = .ballpoint {
+        didSet {
+            guard penKind != oldValue else { return }
+            if tool == .pen {
+                penWidths[oldValue] = width
+                width = penWidths[penKind] ?? penKind.defaultWidth
+            }
+            save()
+        }
+    }
 
     var color: Color = .black {
         didSet { save() }
@@ -102,17 +190,21 @@ final class PaletteState {
 
     var width: CGFloat = ToolKind.pen.defaultWidth {
         didSet {
-            widths[tool] = width
+            storeCurrentWidth(for: tool)
         }
     }
 
     var presetColors: [Color] = Color.defaultPresets {
         didSet { save() }
     }
+    var customColorHistory: [Color] = [] {
+        didSet { save() }
+    }
 
     var undoTrigger: UUID?
     var redoTrigger: UUID?
     var lastActiveCanvas: ActiveCanvas = .main
+    var isStrokeInProgress: Bool = false
 
     var mainCanUndo: Bool = false
     var mainCanRedo: Bool = false
@@ -129,6 +221,16 @@ final class PaletteState {
     private var widths: [ToolKind: CGFloat] = Dictionary(
         uniqueKeysWithValues: ToolKind.allCases.map { ($0, $0.defaultWidth) }
     )
+    private var penWidths: [PenKind: CGFloat] = Dictionary(
+        uniqueKeysWithValues: PenKind.allCases.map { ($0, $0.defaultWidth) }
+    )
+    private var widthSlots: [ToolKind: [CGFloat]] = Dictionary(
+        uniqueKeysWithValues: ToolKind.allCases.map { ($0, Array($0.widthSteps.prefix(3))) }
+    )
+    private var penWidthSlots: [PenKind: [CGFloat]] = Dictionary(
+        uniqueKeysWithValues: PenKind.allCases.map { ($0, Array($0.widthSteps.prefix(3))) }
+    )
+    private var colorSlots: [Color] = Array(Color.defaultPresets.prefix(3))
 
     init() { load() }
 
@@ -137,9 +239,53 @@ final class PaletteState {
         save()
     }
 
+    func setWidthSlot(_ value: CGFloat, at index: Int) {
+        guard (0..<3).contains(index) else { return }
+        let clamped = clamp(value, to: activeWidthRange)
+        var slots = activeWidthSlots
+        slots[index] = clamped
+        if tool == .pen {
+            penWidthSlots[penKind] = slots
+        } else {
+            widthSlots[tool] = slots
+        }
+        width = clamped
+        save()
+    }
+
+    func setSelectedColor(_ color: Color) {
+        self.color = color
+        recordCustomColorIfNeeded(color)
+        save()
+    }
+
+    func setPenKind(_ kind: PenKind) {
+        guard penKind != kind else { return }
+        penKind = kind
+        UIImpactFeedbackGenerator(style: kind.hapticStyle).impactOccurred()
+    }
+
     func setPresetColor(_ color: Color, atIndex index: Int) {
         guard presetColors.indices.contains(index) else { return }
         presetColors[index] = color
+        customColorHistory.removeAll { colorsApproximatelyEqual($0, color) }
+    }
+
+    func setColorSlot(_ color: Color, atIndex index: Int) {
+        guard (0..<3).contains(index) else { return }
+        colorSlots[index] = color
+        setSelectedColor(color)
+    }
+
+    func addPresetColor(_ color: Color) {
+        guard !presetColors.contains(where: { colorsApproximatelyEqual($0, color) }) else {
+            customColorHistory.removeAll { colorsApproximatelyEqual($0, color) }
+            save()
+            return
+        }
+        presetColors.append(color)
+        customColorHistory.removeAll { colorsApproximatelyEqual($0, color) }
+        save()
     }
 
     func triggerUndo() {
@@ -177,6 +323,91 @@ final class PaletteState {
         }
     }
 
+    var activeWidthRange: ClosedRange<CGFloat> {
+        tool == .pen ? penKind.widthRange : tool.widthRange
+    }
+
+    var activeWidthSteps: [CGFloat] {
+        activeWidthSlots
+    }
+
+    var activeWidthPresetSteps: [CGFloat] {
+        let defaults = tool == .pen ? penKind.widthSteps : tool.widthSteps
+        return normalizedPresetSteps(defaults, range: activeWidthRange)
+    }
+
+    var activeWidthSlots: [CGFloat] {
+        let stored = tool == .pen ? penWidthSlots[penKind] : widthSlots[tool]
+        let defaults = tool == .pen ? penKind.widthSteps : tool.widthSteps
+        return normalizedSlots(stored ?? defaults, defaults: defaults, range: activeWidthRange)
+    }
+
+    var activeColorSlots: [Color] {
+        var slots = Array(colorSlots.prefix(3))
+        while slots.count < 3 {
+            slots.append(.black)
+        }
+        return slots
+    }
+
+    private var currentStoredWidth: CGFloat {
+        tool == .pen ? (penWidths[penKind] ?? penKind.defaultWidth) : (widths[tool] ?? tool.defaultWidth)
+    }
+
+    private func storeCurrentWidth(for tool: ToolKind) {
+        if tool == .pen {
+            penWidths[penKind] = width
+        } else {
+            widths[tool] = width
+        }
+    }
+
+    private func normalizedSlots(_ slots: [CGFloat],
+                                 defaults: [CGFloat],
+                                 range: ClosedRange<CGFloat>) -> [CGFloat] {
+        var output = Array(slots.prefix(3))
+        while output.count < 3 {
+            let fallback = defaults.indices.contains(output.count) ? defaults[output.count] : range.lowerBound
+            output.append(fallback)
+        }
+        return output.map { clamp($0, to: range) }
+    }
+
+    private func normalizedPresetSteps(_ steps: [CGFloat], range: ClosedRange<CGFloat>) -> [CGFloat] {
+        var output = Array(steps.prefix(5))
+        while output.count < 5 {
+            let fraction = CGFloat(output.count) / 4
+            output.append(range.lowerBound + (range.upperBound - range.lowerBound) * fraction)
+        }
+        return output.map { clamp($0, to: range) }
+    }
+
+    private func clamp(_ value: CGFloat, to range: ClosedRange<CGFloat>) -> CGFloat {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
+
+    private func recordCustomColorIfNeeded(_ color: Color) {
+        guard !presetColors.contains(where: { colorsApproximatelyEqual($0, color) }) else {
+            customColorHistory.removeAll { colorsApproximatelyEqual($0, color) }
+            return
+        }
+        customColorHistory.removeAll { colorsApproximatelyEqual($0, color) }
+        customColorHistory.insert(color, at: 0)
+        if customColorHistory.count > 12 {
+            customColorHistory.removeLast(customColorHistory.count - 12)
+        }
+    }
+
+    private func colorsApproximatelyEqual(_ a: Color, _ b: Color) -> Bool {
+        let ca = ColorComponents.from(a)
+        let cb = ColorComponents.from(b)
+        let tol: CGFloat = 0.005
+        return abs(ca.r - cb.r) < tol &&
+               abs(ca.g - cb.g) < tol &&
+               abs(ca.b - cb.b) < tol &&
+               abs(ca.a - cb.a) < tol
+    }
+
     private struct ColorComponents: Codable {
         var r: CGFloat
         var g: CGFloat
@@ -197,16 +428,28 @@ final class PaletteState {
 
     private struct Snapshot: Codable {
         var tool: String
+        var penKind: String?
         var color: ColorComponents
         var widths: [String: CGFloat]
+        var penWidths: [String: CGFloat]?
+        var widthSlots: [String: [CGFloat]]?
+        var penWidthSlots: [String: [CGFloat]]?
+        var colorSlots: [ColorComponents]?
+        var customColorHistory: [ColorComponents]?
         var presetColors: [ColorComponents]
     }
 
     private func save() {
         let snap = Snapshot(
             tool: tool.rawValue,
+            penKind: penKind.rawValue,
             color: ColorComponents.from(color),
             widths: Dictionary(uniqueKeysWithValues: widths.map { ($0.key.rawValue, $0.value) }),
+            penWidths: Dictionary(uniqueKeysWithValues: penWidths.map { ($0.key.rawValue, $0.value) }),
+            widthSlots: Dictionary(uniqueKeysWithValues: widthSlots.map { ($0.key.rawValue, $0.value) }),
+            penWidthSlots: Dictionary(uniqueKeysWithValues: penWidthSlots.map { ($0.key.rawValue, $0.value) }),
+            colorSlots: colorSlots.map { ColorComponents.from($0) },
+            customColorHistory: customColorHistory.map { ColorComponents.from($0) },
             presetColors: presetColors.map { ColorComponents.from($0) }
         )
         if let data = try? JSONEncoder().encode(snap) {
@@ -222,14 +465,67 @@ final class PaletteState {
                 widths[kind] = v
             }
         }
+        if let savedPenWidths = snap.penWidths {
+            for (k, v) in savedPenWidths {
+                if let kind = PenKind(rawValue: k) {
+                    penWidths[kind] = v
+                }
+            }
+        } else if let legacyPenWidth = snap.widths[ToolKind.pen.rawValue] {
+            penWidths[.ballpoint] = legacyPenWidth
+        }
+        if let savedWidthSlots = snap.widthSlots {
+            for (k, v) in savedWidthSlots {
+                if let kind = ToolKind(rawValue: k) {
+                    widthSlots[kind] = normalizedSlots(v,
+                                                        defaults: kind.widthSteps,
+                                                        range: kind.widthRange)
+                }
+            }
+        }
+        if let savedPenWidthSlots = snap.penWidthSlots {
+            for (k, v) in savedPenWidthSlots {
+                if let kind = PenKind(rawValue: k) {
+                    penWidthSlots[kind] = normalizedSlots(v,
+                                                          defaults: kind.widthSteps,
+                                                          range: kind.widthRange)
+                }
+            }
+        }
+        if let savedPenKind = snap.penKind,
+           let kind = PenKind(rawValue: savedPenKind) {
+            penKind = kind
+        }
         if let kind = ToolKind(rawValue: snap.tool) {
             tool = kind
-            width = widths[kind] ?? kind.defaultWidth
+            width = currentStoredWidth
         }
         color = snap.color.color
-        if snap.presetColors.count == Color.defaultPresets.count {
+        if !snap.presetColors.isEmpty {
             presetColors = snap.presetColors.map { $0.color }
         }
+        if let savedColorSlots = snap.colorSlots {
+            let slots = savedColorSlots.map { $0.color }
+            if !slots.isEmpty {
+                colorSlots = normalizedColorSlots(slots)
+            }
+        } else {
+            colorSlots = normalizedColorSlots(Array(presetColors.prefix(3)))
+        }
+        if let savedHistory = snap.customColorHistory {
+            customColorHistory = savedHistory
+                .map { $0.color }
+                .filter { color in !presetColors.contains(where: { colorsApproximatelyEqual($0, color) }) }
+        }
+    }
+
+    private func normalizedColorSlots(_ slots: [Color]) -> [Color] {
+        var output = Array(slots.prefix(3))
+        while output.count < 3 {
+            let fallback = presetColors.indices.contains(output.count) ? presetColors[output.count] : .black
+            output.append(fallback)
+        }
+        return output
     }
 }
 

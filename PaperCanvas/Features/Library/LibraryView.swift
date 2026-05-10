@@ -12,7 +12,7 @@ struct LibraryView: View {
     @State private var downloader = URLDownloader()
     @State private var selectedPaper: PaperDocument?
 
-    private let columns = [GridItem(.adaptive(minimum: 200), spacing: 24)]
+    private let columns = [GridItem(.adaptive(minimum: 200), spacing: Spacing.xl)]
 
     var body: some View {
         NavigationStack {
@@ -35,9 +35,10 @@ struct LibraryView: View {
                 .overlay(alignment: .top) {
                     if downloader.isDownloading {
                         ProgressView("다운로드 중…")
-                            .padding(12)
-                            .background(.regularMaterial, in: .rect(cornerRadius: 12))
-                            .padding(.top, 12)
+                            .padding(.horizontal, Spacing.l)
+                            .padding(.vertical, Spacing.m)
+                            .chromeGlassRect(cornerRadius: Radius.l)
+                            .padding(.top, Spacing.m)
                     }
                 }
         }
@@ -57,7 +58,7 @@ struct LibraryView: View {
             } description: {
                 Text("파일에서 PDF를 가져오거나 URL에서 다운로드하세요.")
             } actions: {
-                HStack(spacing: 12) {
+                HStack(spacing: Spacing.m) {
                     Button {
                         showingFilePicker = true
                     } label: {
@@ -73,7 +74,7 @@ struct LibraryView: View {
             }
         } else {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 24) {
+                LazyVGrid(columns: columns, spacing: Spacing.xl) {
                     ForEach(papers) { paper in
                         Button {
                             selectedPaper = paper
@@ -88,7 +89,7 @@ struct LibraryView: View {
                         }
                     }
                 }
-                .padding(24)
+                .padding(Spacing.xl)
             }
         }
     }
@@ -157,31 +158,34 @@ private struct PaperCard: View {
     @State private var thumbnail: UIImage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             ZStack {
-                Color(.tertiarySystemFill)
+                Color.Surface.fill
                 if let thumbnail {
                     Image(uiImage: thumbnail)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                 } else {
                     Image(systemName: "doc.text")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.Ink.secondary)
                         .font(.largeTitle)
                 }
             }
             .aspectRatio(0.75, contentMode: .fit)
-            .clipShape(.rect(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator)))
+            .clipShape(.rect(cornerRadius: Radius.l))
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.l)
+                    .stroke(Color.Rule.hairline)
+            )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(paper.title)
-                    .font(.subheadline)
+                    .font(AppType.callout)
                     .lineLimit(2)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.Ink.primary)
                 Text(paper.updatedAt, format: .relative(presentation: .named))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AppType.caption)
+                    .foregroundStyle(Color.Ink.secondary)
             }
         }
         .task(id: paper.id) {

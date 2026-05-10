@@ -22,6 +22,9 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
     var onUndoRedoStateChanged: ((Bool, Bool) -> Void)? = nil
     var onMainCanvasActivated: (() -> Void)? = nil
     var onPencilTap: (() -> Void)? = nil
+    var onZoomChanged: ((CGFloat) -> Void)? = nil
+    var onStrokeBegan: (() -> Void)? = nil
+    var onStrokeEnded: (() -> Void)? = nil
 
     static let defaultContentSize = CGSize(width: 4000, height: 4000)
     static let expansionMargin: CGFloat = 600
@@ -30,7 +33,11 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    func makeUIView(context: Context) -> PKCanvasView {
+    func makeUIView(context: Context) -> UIView {
+        let wrapper = UIView()
+        wrapper.backgroundColor = .systemBackground
+        wrapper.clipsToBounds = true
+
         let canvas = PKCanvasView()
         #if targetEnvironment(simulator)
         canvas.drawingPolicy = .anyInput
@@ -46,44 +53,108 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         canvas.minimumZoomScale = 0.5
         canvas.maximumZoomScale = 4.0
         canvas.contentSize = initialContentSize
-        canvas.drawing = drawing
         canvas.tool = tool
+        canvas.drawing = drawing
         canvas.addInteraction(UIDropInteraction(delegate: context.coordinator))
         let pencil = UIPencilInteraction()
         pencil.delegate = context.coordinator
         canvas.addInteraction(pencil)
 
+        canvas.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(canvas)
+        NSLayoutConstraint.activate([
+            canvas.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            canvas.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+            canvas.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            canvas.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor)
+        ])
+
+        let inkMetalView = InkMetalView(frame: wrapper.bounds, device: nil)
+        inkMetalView.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(inkMetalView)
+        NSLayoutConstraint.activate([
+            inkMetalView.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            inkMetalView.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+            inkMetalView.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            inkMetalView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor)
+        ])
+
+        context.coordinator.attach(canvas: canvas, inkMetalView: inkMetalView)
         context.coordinator.lastAppliedBackground = background
+        context.coordinator.syncRendererFromCanvas(canvas)
+        context.coordinator.lastSyncedData = drawing.dataRepresentation()
 
         DispatchQueue.main.async {
             canvas.becomeFirstResponder()
             context.coordinator.applyInitialOffsetIfNeeded(canvas)
             context.coordinator.syncScraps(in: canvas, with: scraps)
+            context.coordinator.updateCameraMatrix()
         }
-        return canvas
+        return wrapper
     }
 
-    func updateUIView(_ uiView: PKCanvasView, context: Context) {
+    func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.parent = self
-        if uiView.drawing != drawing { uiView.drawing = drawing }
-        uiView.tool = tool
-        context.coordinator.syncBackground(in: uiView, type: background)
-        context.coordinator.syncScraps(in: uiView, with: scraps)
-        context.coordinator.handleResetIfNeeded(uiView)
-        context.coordinator.handleUndoRedoIfNeeded(uiView)
+        guard let canvas = context.coordinator.canvas else { return }
+        let externalData = drawing.dataRepresentation()
+        if externalData != context.coordinator.lastSyncedData {
+            context.coordinator.isApplyingExternalDrawing = true
+            canvas.drawing = drawing
+            context.coordinator.isApplyingExternalDrawing = false
+            context.coordinator.lastSyncedData = externalData
+            context.coordinator.syncRendererFromCanvas(canvas)
+        }
+        canvas.tool = tool
+        context.coordinator.syncBackground(in: canvas, type: background)
+        context.coordinator.syncScraps(in: canvas, with: scraps)
+        context.coordinator.handleResetIfNeeded(canvas)
+        context.coordinator.handleUndoRedoIfNeeded(canvas)
     }
 
     @MainActor
     final class Coordinator: NSObject, PKCanvasViewDelegate, UIDropInteractionDelegate, UIPencilInteractionDelegate {
         var parent: InfiniteCanvasContainer
         var lastAppliedBackground: CanvasBackground?
+        var lastSyncedData: Data?
+        var isApplyingExternalDrawing = false
+        weak var canvas: PKCanvasView?
+        weak var inkMetalView: InkMetalView?
         private var didApplyInitialOffset = false
         private var scrapViews: [UUID: ScrapOverlayView] = [:]
         private var lastResetTrigger: UUID?
         private var lastUndoTrigger: UUID?
         private var lastRedoTrigger: UUID?
+        private var isUserDrawing = false
 
         init(_ parent: InfiniteCanvasContainer) { self.parent = parent }
+
+        func attach(canvas: PKCanvasView, inkMetalView: InkMetalView) {
+            self.canvas = canvas
+            self.inkMetalView = inkMetalView
+        }
+
+        func syncRendererFromCanvas(_ canvas: PKCanvasView) {
+            inkMetalView?.inkRenderer.setStrokes(PKDrawingConverter.toInkStrokes(canvas.drawing))
+            inkMetalView?.inkRenderer.setInProgress(nil)
+            inkMetalView?.setNeedsDisplay()
+        }
+
+        // MARK: - Camera
+
+        func updateCameraMatrix() {
+            guard let canvas, let inkMetalView else { return }
+            guard canvas.bounds.width > 0, canvas.bounds.height > 0 else { return }
+            let viewport = SIMD2<Float>(Float(canvas.bounds.width), Float(canvas.bounds.height))
+            let zoom = Float(max(canvas.zoomScale, 0.0001))
+            let panInWorld = SIMD2<Float>(
+                Float(canvas.contentOffset.x / canvas.zoomScale),
+                Float(canvas.contentOffset.y / canvas.zoomScale)
+            )
+            inkMetalView.inkRenderer.cameraTransform = InkCamera.matrix(
+                viewport: viewport, panInWorld: panInWorld, zoom: zoom
+            )
+            inkMetalView.setNeedsDisplay()
+        }
 
         func applyInitialOffsetIfNeeded(_ canvas: PKCanvasView) {
             guard !didApplyInitialOffset else { return }
@@ -99,6 +170,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             }
             canvas.setContentOffset(target, animated: false)
             didApplyInitialOffset = true
+            updateCameraMatrix()
         }
 
         func syncBackground(in canvas: PKCanvasView, type: CanvasBackground) {
@@ -118,6 +190,8 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                 let target = CGPoint(x: max(0, cx), y: max(0, cy))
                 canvas.setContentOffset(target, animated: true)
                 self?.parent.contentOffset = target
+                self?.updateCameraMatrix()
+                self?.parent.onZoomChanged?(1.0)
             }
         }
 
@@ -137,6 +211,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             if didFire {
                 DispatchQueue.main.async { [weak self, weak canvas] in
                     guard let self, let canvas else { return }
+                    self.syncRendererFromCanvas(canvas)
                     self.parent.onUndoRedoStateChanged?(
                         canvas.undoManager?.canUndo ?? false,
                         canvas.undoManager?.canRedo ?? false
@@ -177,13 +252,49 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             }
         }
 
+        // MARK: - PKCanvasViewDelegate
+
+        func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
+            isUserDrawing = true
+            parent.onStrokeBegan?()
+        }
+
+        func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
+            isUserDrawing = false
+            inkMetalView?.inkRenderer.setInProgress(nil)
+            syncRendererFromCanvas(canvasView)
+            publishDrawing(canvasView.drawing)
+            notifyUndoRedoState(canvasView)
+            parent.onStrokeEnded?()
+        }
+
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+            guard !isApplyingExternalDrawing else { return }
+            if isUserDrawing {
+                if let last = canvasView.drawing.strokes.last,
+                   let inkStroke = PKDrawingConverter.convert(last) {
+                    inkMetalView?.inkRenderer.setInProgress(inkStroke)
+                    inkMetalView?.setNeedsDisplay()
+                }
+            } else {
+                inkMetalView?.inkRenderer.setInProgress(nil)
+                syncRendererFromCanvas(canvasView)
+                publishDrawing(canvasView.drawing)
+                notifyUndoRedoState(canvasView)
+            }
             parent.onMainCanvasActivated?()
+        }
+
+        private func publishDrawing(_ drawing: PKDrawing) {
+            lastSyncedData = drawing.dataRepresentation()
+            parent.drawing = drawing
+        }
+
+        private func notifyUndoRedoState(_ canvasView: PKCanvasView) {
             parent.onUndoRedoStateChanged?(
                 canvasView.undoManager?.canUndo ?? false,
                 canvasView.undoManager?.canRedo ?? false
             )
-            parent.drawing = canvasView.drawing
         }
 
         func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
@@ -200,9 +311,13 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             }
         }
 
+        // MARK: - UIScrollViewDelegate
+
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             guard let canvas = scrollView as? PKCanvasView else { return }
+            guard !scrollView.isZooming, !scrollView.isZoomBouncing else { return }
             expandIfNearEdges(canvas)
+            updateCameraMatrix()
         }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
@@ -210,6 +325,15 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             for view in scrapViews.values {
                 view.applyZoom(scale)
             }
+            updateCameraMatrix()
+            parent.onZoomChanged?(scale)
+        }
+
+        func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+            guard let canvas = scrollView as? PKCanvasView else { return }
+            expandIfNearEdges(canvas)
+            commitOffset(canvas)
+            updateCameraMatrix()
         }
 
         func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
@@ -261,6 +385,8 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             }
         }
 
+        // MARK: - UIDropInteraction
+
         func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
             if session.items.contains(where: { $0.localObject is TextScrapPayload }) { return true }
             if session.items.contains(where: { $0.localObject is ImageScrapPayload }) { return true }
@@ -273,7 +399,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         }
 
         func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
-            guard let canvas = interaction.view else { return }
+            guard let canvas = interaction.view as? PKCanvasView ?? self.canvas else { return }
             let location = session.location(in: canvas)
 
             if let textPayload = session.items.compactMap({ $0.localObject as? TextScrapPayload }).first {

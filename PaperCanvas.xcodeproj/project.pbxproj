@@ -30,6 +30,26 @@
 		C4D5E6F7081A2B3C4D5E6F70 /* PageInk.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E6F7081A2B3C4D5E6F7081 /* PageInk.swift */; };
 		E5F6A7B8C9D0E1F2A3B4C5D6 /* PDFInkCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7B8C9D0E1F2A3B4C5D6E7 /* PDFInkCanvas.swift */; };
 		F8F326E05A234A70FDBC2813 /* URLDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26250D7FC71E10C4C119EC82 /* URLDownloader.swift */; };
+		1A2B3C4D5E6F7081A2B3C4D5 /* InkStroke.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F7081A2B3C4D5E6 /* InkStroke.swift */; };
+		3C4D5E6F7081A2B3C4D5E6F7 /* PKDrawingConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D5E6F7081A2B3C4D5E6F708 /* PKDrawingConverter.swift */; };
+		D9E0F1A2B3C4D5E6F708192A /* InkStrokeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0F1A2B3C4D5E6F708192A3B /* InkStrokeGeometry.swift */; };
+		A1A2A3A4A5A6A7A8A9A0A1A2 /* InkRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B2B3B4B5B6B7B8B9B0B1B2 /* InkRenderer.swift */; };
+		C1C2C3C4C5C6C7C8C9C0C1C2 /* InkMetalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1D2D3D4D5D6D7D8D9D0D1D2 /* InkMetalView.swift */; };
+		F1F2F3F4F5F6F7F8F9F0F1F2 /* InkPageOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2A3A4A5A6A7A8A9A0A1A2A3 /* InkPageOverlayView.swift */; };
+		A120B220C320D420E520F620 /* Color+Tokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A110B210C310D410E510F610 /* Color+Tokens.swift */; };
+		A121B221C321D421E521F621 /* Type.swift in Sources */ = {isa = PBXBuildFile; fileRef = A111B211C311D411E511F611 /* Type.swift */; };
+		A122B222C322D422E522F622 /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A112B212C312D412E512F612 /* Spacing.swift */; };
+		A123B223C323D423E523F623 /* Radius.swift in Sources */ = {isa = PBXBuildFile; fileRef = A113B213C313D413E513F613 /* Radius.swift */; };
+		A124B224C324D424E524F624 /* Motion.swift in Sources */ = {isa = PBXBuildFile; fileRef = A114B214C314D414E514F614 /* Motion.swift */; };
+		A125B225C325D425E525F625 /* Glass.swift in Sources */ = {isa = PBXBuildFile; fileRef = A115B215C315D415E515F615 /* Glass.swift */; };
+		A126B226C326D426E526F626 /* DesignTokensPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = A116B216C316D416E516F616 /* DesignTokensPreview.swift */; };
+		A140B240C340D440E540F640 /* UnifiedTopBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A130B230C330D430E530F630 /* UnifiedTopBar.swift */; };
+		A141B241C341D441E541F641 /* TopBarMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A131B231C331D431E531F631 /* TopBarMetrics.swift */; };
+		A127B227C327D427E527F627 /* StatusDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A117B217C317D417E517F617 /* StatusDot.swift */; };
+		A128B228C328D428E528F628 /* PageIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A118B218C318D418E518F618 /* PageIndicator.swift */; };
+		A129B229C329D429E529F629 /* ActiveCanvasBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A119B219C319D419E519F619 /* ActiveCanvasBadge.swift */; };
+		A142B242C342D442E542F642 /* ContextRightZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = A132B232C332D432E532F632 /* ContextRightZone.swift */; };
+		A151B251C351D451E551F651 /* PageJumpSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A150B250C350D450E550F650 /* PageJumpSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +77,27 @@
 		DE45F067891B2C3D4E5F6071 /* PaletteToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaletteToolbar.swift; sourceTree = "<group>"; };
 		D1ECB0E9D8D685C37AE8072E /* RaDA.pdf */ = {isa = PBXFileReference; lastKnownFileType = image.pdf; path = RaDA.pdf; sourceTree = "<group>"; };
 		ED0165CE5459C38FC2CC32F9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		2B3C4D5E6F7081A2B3C4D5E6 /* InkStroke.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkStroke.swift; sourceTree = "<group>"; };
+		4D5E6F7081A2B3C4D5E6F708 /* PKDrawingConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PKDrawingConverter.swift; sourceTree = "<group>"; };
+		E0F1A2B3C4D5E6F708192A3B /* InkStrokeGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkStrokeGeometry.swift; sourceTree = "<group>"; };
+		B1B2B3B4B5B6B7B8B9B0B1B2 /* InkRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkRenderer.swift; sourceTree = "<group>"; };
+		D1D2D3D4D5D6D7D8D9D0D1D2 /* InkMetalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkMetalView.swift; sourceTree = "<group>"; };
+		C5C5C5C5C5C5C5C5C5C5C5C5 /* Ink.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Ink.metal; sourceTree = "<group>"; };
+		A2A3A4A5A6A7A8A9A0A1A2A3 /* InkPageOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkPageOverlayView.swift; sourceTree = "<group>"; };
+		A110B210C310D410E510F610 /* Color+Tokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Tokens.swift"; sourceTree = "<group>"; };
+		A111B211C311D411E511F611 /* Type.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Type.swift; sourceTree = "<group>"; };
+		A112B212C312D412E512F612 /* Spacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spacing.swift; sourceTree = "<group>"; };
+		A113B213C313D413E513F613 /* Radius.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Radius.swift; sourceTree = "<group>"; };
+		A114B214C314D414E514F614 /* Motion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Motion.swift; sourceTree = "<group>"; };
+		A115B215C315D415E515F615 /* Glass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Glass.swift; sourceTree = "<group>"; };
+		A116B216C316D416E516F616 /* DesignTokensPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokensPreview.swift; sourceTree = "<group>"; };
+		A130B230C330D430E530F630 /* UnifiedTopBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedTopBar.swift; sourceTree = "<group>"; };
+		A131B231C331D431E531F631 /* TopBarMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopBarMetrics.swift; sourceTree = "<group>"; };
+		A117B217C317D417E517F617 /* StatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusDot.swift; sourceTree = "<group>"; };
+		A118B218C318D418E518F618 /* PageIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageIndicator.swift; sourceTree = "<group>"; };
+		A119B219C319D419E519F619 /* ActiveCanvasBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveCanvasBadge.swift; sourceTree = "<group>"; };
+		A132B232C332D432E532F632 /* ContextRightZone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextRightZone.swift; sourceTree = "<group>"; };
+		A150B250C350D450E550F650 /* PageJumpSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageJumpSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -66,6 +107,7 @@
 				D5E6F7081A2B3C4D5E6F7081 /* PageInk.swift */,
 				6CD90B3C55111F0006A987CD /* PaperDocument.swift */,
 				5B02E628DF9351673813C0F4 /* ScrapItem.swift */,
+				2B3C4D5E6F7081A2B3C4D5E6 /* InkStroke.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -76,6 +118,8 @@
 				F6A7B8C9D0E1F2A3B4C5D6E7 /* PDFInkCanvas.swift */,
 				9D3F8E38ADB78CC24A7F3E79 /* PDFKitView.swift */,
 				C88B74C3BB50C919C9C10C53 /* RegionMarqueeOverlay.swift */,
+				A2A3A4A5A6A7A8A9A0A1A2A3 /* InkPageOverlayView.swift */,
+				A150B250C350D450E550F650 /* PageJumpSheet.swift */,
 			);
 			path = PDFViewer;
 			sourceTree = "<group>";
@@ -97,6 +141,7 @@
 				1A14CF90D642FA311B7C8FC9 /* PDFViewer */,
 				F1301FA28652318DB15402F7 /* Shared */,
 				EF5678901A2B3C4D5E6F7081 /* Toolbar */,
+				A0A1B2C3D4E5F6071A2B3C4F /* InkEngine */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -106,8 +151,52 @@
 			children = (
 				BC23DE45F067891B2C3D4E5F /* PaletteState.swift */,
 				DE45F067891B2C3D4E5F6071 /* PaletteToolbar.swift */,
+				A130B230C330D430E530F630 /* UnifiedTopBar.swift */,
+				A131B231C331D431E531F631 /* TopBarMetrics.swift */,
+				A132B232C332D432E532F632 /* ContextRightZone.swift */,
 			);
 			path = Toolbar;
+			sourceTree = "<group>";
+		};
+		A100B200C300D400E500F600 /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				A101B201C301D401E501F601 /* Tokens */,
+				A103B203C303D403E503F603 /* Components */,
+				A102B202C302D402E502F602 /* Previews */,
+			);
+			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		A103B203C303D403E503F603 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				A117B217C317D417E517F617 /* StatusDot.swift */,
+				A118B218C318D418E518F618 /* PageIndicator.swift */,
+				A119B219C319D419E519F619 /* ActiveCanvasBadge.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		A101B201C301D401E501F601 /* Tokens */ = {
+			isa = PBXGroup;
+			children = (
+				A110B210C310D410E510F610 /* Color+Tokens.swift */,
+				A111B211C311D411E511F611 /* Type.swift */,
+				A112B212C312D412E512F612 /* Spacing.swift */,
+				A113B213C313D413E513F613 /* Radius.swift */,
+				A114B214C314D414E514F614 /* Motion.swift */,
+				A115B215C315D415E515F615 /* Glass.swift */,
+			);
+			path = Tokens;
+			sourceTree = "<group>";
+		};
+		A102B202C302D402E502F602 /* Previews */ = {
+			isa = PBXGroup;
+			children = (
+				A116B216C316D416E516F616 /* DesignTokensPreview.swift */,
+			);
+			path = Previews;
 			sourceTree = "<group>";
 		};
 		5614C04AE8B9136671C7798A /* Loading */ = {
@@ -140,6 +229,7 @@
 			isa = PBXGroup;
 			children = (
 				8A4073CEE707CCD85F05CDCB /* App */,
+				A100B200C300D400E500F600 /* DesignSystem */,
 				3593901D041E224C8406EE04 /* Features */,
 				11F14C56FC07F65930380AAB /* Models */,
 				E4256D52EEC38480BDDE8647 /* Resources */,
@@ -192,6 +282,26 @@
 				84B7F65F4133460646449A5B /* SharedToolPicker.swift */,
 			);
 			path = Shared;
+			sourceTree = "<group>";
+		};
+		A0A1B2C3D4E5F6071A2B3C4F /* InkEngine */ = {
+			isa = PBXGroup;
+			children = (
+				4D5E6F7081A2B3C4D5E6F708 /* PKDrawingConverter.swift */,
+				E0F1A2B3C4D5E6F708192A3B /* InkStrokeGeometry.swift */,
+				B1B2B3B4B5B6B7B8B9B0B1B2 /* InkRenderer.swift */,
+				D1D2D3D4D5D6D7D8D9D0D1D2 /* InkMetalView.swift */,
+				B0B1B2B3B4B5B6B7B8B9BABA /* Shaders */,
+			);
+			path = InkEngine;
+			sourceTree = "<group>";
+		};
+		B0B1B2B3B4B5B6B7B8B9BABA /* Shaders */ = {
+			isa = PBXGroup;
+			children = (
+				C5C5C5C5C5C5C5C5C5C5C5C5 /* Ink.metal */,
+			);
+			path = Shaders;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -286,6 +396,26 @@
 				2A87B5A856B7D61C88BD16EF /* ScrapOverlayView.swift in Sources */,
 				7E962A3F9AB4A13B3BEE66A8 /* SharedToolPicker.swift in Sources */,
 				F8F326E05A234A70FDBC2813 /* URLDownloader.swift in Sources */,
+				1A2B3C4D5E6F7081A2B3C4D5 /* InkStroke.swift in Sources */,
+				3C4D5E6F7081A2B3C4D5E6F7 /* PKDrawingConverter.swift in Sources */,
+				D9E0F1A2B3C4D5E6F708192A /* InkStrokeGeometry.swift in Sources */,
+				A1A2A3A4A5A6A7A8A9A0A1A2 /* InkRenderer.swift in Sources */,
+				C1C2C3C4C5C6C7C8C9C0C1C2 /* InkMetalView.swift in Sources */,
+				F1F2F3F4F5F6F7F8F9F0F1F2 /* InkPageOverlayView.swift in Sources */,
+				A120B220C320D420E520F620 /* Color+Tokens.swift in Sources */,
+				A121B221C321D421E521F621 /* Type.swift in Sources */,
+				A122B222C322D422E522F622 /* Spacing.swift in Sources */,
+				A123B223C323D423E523F623 /* Radius.swift in Sources */,
+				A124B224C324D424E524F624 /* Motion.swift in Sources */,
+				A125B225C325D425E525F625 /* Glass.swift in Sources */,
+				A126B226C326D426E526F626 /* DesignTokensPreview.swift in Sources */,
+				A140B240C340D440E540F640 /* UnifiedTopBar.swift in Sources */,
+				A141B241C341D441E541F641 /* TopBarMetrics.swift in Sources */,
+				A127B227C327D427E527F627 /* StatusDot.swift in Sources */,
+				A128B228C328D428E528F628 /* PageIndicator.swift in Sources */,
+				A129B229C329D429E529F629 /* ActiveCanvasBadge.swift in Sources */,
+				A142B242C342D442E542F642 /* ContextRightZone.swift in Sources */,
+				A151B251C351D451E551F651 /* PageJumpSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -341,7 +471,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -411,7 +541,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -436,7 +566,7 @@
 				DEVELOPMENT_TEAM = L64524W7S7;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaperCanvas/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -457,7 +587,7 @@
 				DEVELOPMENT_TEAM = L64524W7S7;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaperCanvas/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
