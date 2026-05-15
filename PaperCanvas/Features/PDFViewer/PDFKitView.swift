@@ -827,13 +827,16 @@ struct PDFKitView: UIViewRepresentable {
         private func strokeByErasingPixels(in stroke: InkStroke,
                                            with eraser: InkStroke,
                                            radius: CGFloat) -> [InkStroke] {
-            let expanded = stroke.boundingBox.insetBy(dx: -radius, dy: -radius)
-            guard expanded.intersects(eraser.boundingBox) else { return [stroke] }
+            let threshold = radius + stroke.baseWidth * 0.5
+            let expandedStrokeBounds = stroke.boundingBox.insetBy(dx: -threshold, dy: -threshold)
+            let expandedEraserBounds = eraser.boundingBox.insetBy(dx: -threshold, dy: -threshold)
+            guard expandedStrokeBounds.intersects(expandedEraserBounds) else { return [stroke] }
 
             var fragments: [[InkPoint]] = []
             var current: [InkPoint] = []
             var didErasePoint = false
-            for point in stroke.points {
+            let points = resampledPoints(for: stroke)
+            for point in points {
                 if isPoint(point, insideEraser: eraser, strokeWidth: stroke.baseWidth, radius: radius) {
                     didErasePoint = true
                     if !current.isEmpty {
@@ -860,20 +863,93 @@ struct PDFKitView: UIViewRepresentable {
             }
         }
 
+        private func resampledPoints(for stroke: InkStroke) -> [InkPoint] {
+            guard let first = stroke.points.first else { return [] }
+            guard stroke.points.count > 1 else { return stroke.points }
+
+            let maxSpacing = max(0.75, min(stroke.baseWidth * 0.35, 3))
+            var result: [InkPoint] = [first]
+            for (start, end) in zip(stroke.points, stroke.points.dropFirst()) {
+                let segmentLength = hypot(
+                    end.location.x - start.location.x,
+                    end.location.y - start.location.y
+                )
+                guard segmentLength > 0.001 else {
+                    result.append(end)
+                    continue
+                }
+                let steps = max(1, Int(ceil(segmentLength / maxSpacing)))
+                for step in 1...steps {
+                    let t = CGFloat(step) / CGFloat(steps)
+                    result.append(interpolateInkPoint(from: start, to: end, t: t))
+                }
+            }
+            return result
+        }
+
+        private func interpolateInkPoint(from start: InkPoint, to end: InkPoint, t: CGFloat) -> InkPoint {
+            InkPoint(
+                location: CGPoint(
+                    x: start.location.x + (end.location.x - start.location.x) * t,
+                    y: start.location.y + (end.location.y - start.location.y) * t
+                ),
+                force: start.force + (end.force - start.force) * t,
+                altitude: start.altitude + (end.altitude - start.altitude) * t,
+                azimuth: start.azimuth + (end.azimuth - start.azimuth) * t,
+                size: start.size + (end.size - start.size) * t,
+                opacity: start.opacity + (end.opacity - start.opacity) * t,
+                timeOffset: start.timeOffset + (end.timeOffset - start.timeOffset) * TimeInterval(t)
+            )
+        }
+
         private func isPoint(_ point: InkPoint,
                              insideEraser eraser: InkStroke,
                              strokeWidth: CGFloat,
                              radius: CGFloat) -> Bool {
             let threshold = radius + strokeWidth * 0.5
             let thresholdSquared = threshold * threshold
-            for eraserPoint in eraser.points {
-                let dx = eraserPoint.location.x - point.location.x
-                let dy = eraserPoint.location.y - point.location.y
+            guard let firstEraserPoint = eraser.points.first else { return false }
+            if eraser.points.count == 1 {
+                let dx = firstEraserPoint.location.x - point.location.x
+                let dy = firstEraserPoint.location.y - point.location.y
                 if dx * dx + dy * dy <= thresholdSquared {
+                    return true
+                }
+                return false
+            }
+            for (start, end) in zip(eraser.points, eraser.points.dropFirst()) {
+                if distanceSquared(
+                    from: point.location,
+                    toSegmentStart: start.location,
+                    end: end.location
+                ) <= thresholdSquared {
                     return true
                 }
             }
             return false
+        }
+
+        private func distanceSquared(from point: CGPoint,
+                                     toSegmentStart start: CGPoint,
+                                     end: CGPoint) -> CGFloat {
+            let dx = end.x - start.x
+            let dy = end.y - start.y
+            let lengthSquared = dx * dx + dy * dy
+            guard lengthSquared > 0 else {
+                let px = point.x - start.x
+                let py = point.y - start.y
+                return px * px + py * py
+            }
+
+            let projection = ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared
+            let clamped = min(1, max(0, projection))
+            let closest = CGPoint(
+                x: start.x + dx * clamped,
+                y: start.y + dy * clamped
+            )
+            let px = point.x - closest.x
+            let py = point.y - closest.y
+            return px * px + py * py
         }
 
         func handleUndoRedoIfNeeded() {
