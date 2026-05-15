@@ -15,7 +15,8 @@ private enum DocumentSwitcherGlassID: Hashable, Sendable {
 struct SplitTopBar: View {
     let noteTitle: String
     let canvasTitle: String
-    let activePaperID: UUID
+    let activeNotePaperID: UUID?
+    let activeCanvasPaperID: UUID?
     let documents: [PaperDocument]
     var documentSwitcherKind: PaperDocumentKind?
 
@@ -69,7 +70,7 @@ struct SplitTopBar: View {
         DocumentSwitcherPanel(
             selectedKind: kind,
             documents: documents,
-            activePaperID: activePaperID,
+            activePaperID: kind == .note ? activeNotePaperID : activeCanvasPaperID,
             onSelectDocument: onSelectDocument,
             onCreateDocument: { onCreateDocument(kind) }
         )
@@ -303,7 +304,7 @@ struct SplitTopBar: View {
 private struct DocumentSwitcherPanel: View {
     let selectedKind: PaperDocumentKind
     let documents: [PaperDocument]
-    let activePaperID: UUID
+    let activePaperID: UUID?
     let onSelectDocument: (PaperDocument) -> Void
     let onCreateDocument: () -> Void
 

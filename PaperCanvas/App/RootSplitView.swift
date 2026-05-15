@@ -15,7 +15,8 @@ struct RootSplitView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \PaperDocument.updatedAt, order: .reverse) private var libraryPapers: [PaperDocument]
 
-    @State private var activePaperID: UUID?
+    @State private var activeNotePaperID: UUID?
+    @State private var activeCanvasPaperID: UUID?
     @State private var pdfDocument: PDFDocument?
     @State private var canvasDrawing = PKDrawing()
     @State private var pdfInkStrokes: [Int: [InkStroke]] = [:]
@@ -25,7 +26,8 @@ struct RootSplitView: View {
     @State private var canvasResetTrigger: UUID?
     @State private var leftFraction: CGFloat = 0.5
     @State private var loadError: String?
-    @State private var didLoad = false
+    @State private var didLoadNote = false
+    @State private var didLoadCanvas = false
     @State private var palettePDF = PaletteState()
     @State private var paletteCanvas = PaletteState()
     @State private var activeInputSurface: InputSurface = .canvas
@@ -40,12 +42,20 @@ struct RootSplitView: View {
     @State private var documentSwitcherKind: PaperDocumentKind?
     @AppStorage("PaperCanvas.autoHideTopBar") private var autoHideTopBar = false
 
-    private var activePaper: PaperDocument {
-        guard let activePaperID,
-              let paper = libraryPapers.first(where: { $0.id == activePaperID }) else {
-            return paper
-        }
-        return paper
+    private var activeNotePaper: PaperDocument? {
+        guard let id = activeNotePaperID else { return nil }
+        return libraryPapers.first(where: { $0.id == id })
+    }
+
+    private var activeCanvasPaper: PaperDocument? {
+        guard let id = activeCanvasPaperID else { return nil }
+        return libraryPapers.first(where: { $0.id == id })
+    }
+
+    /// Paper used as a fallback for context (folder lookup, etc.) when one of
+    /// the panes is empty. Prefers whichever pane is currently populated.
+    private var contextPaper: PaperDocument {
+        activeNotePaper ?? activeCanvasPaper ?? paper
     }
 
     private var switchablePapers: [PaperDocument] {
@@ -74,11 +84,13 @@ struct RootSplitView: View {
     private let maxFraction: CGFloat = 0.8
 
     private var canvasBackground: CanvasBackground {
-        CanvasBackground(rawValue: activePaper.canvasBackgroundRaw) ?? .dots
+        guard let raw = activeCanvasPaper?.canvasBackgroundRaw else { return .dots }
+        return CanvasBackground(rawValue: raw) ?? .dots
     }
 
     private var hasPDFSource: Bool {
-        activePaper.bookmarkData != nil || !(activePaper.sourceURLString?.isEmpty ?? true)
+        guard let note = activeNotePaper else { return false }
+        return note.bookmarkData != nil || !(note.sourceURLString?.isEmpty ?? true)
     }
 
     var body: some View {
@@ -108,12 +120,26 @@ struct RootSplitView: View {
                 onSave: saveTextNote
             )
         }
-        .task(id: activePaper.id) { await loadIfNeeded() }
+        .task { setupInitialActivePapers() }
+        .task(id: activeNotePaperID) { await loadNoteIfNeeded() }
+        .task(id: activeCanvasPaperID) { await loadCanvasIfNeeded() }
         .onChange(of: canvasDrawing) { _, _ in scheduleSave() }
         .onChange(of: pdfInkStrokes) { _, _ in scheduleSave() }
         .onChange(of: contentOffset) { _, _ in scheduleSave() }
         .onChange(of: currentPageIndex) { _, _ in scheduleSave() }
         .onDisappear { handleDisappear() }
+    }
+
+    private func setupInitialActivePapers() {
+        guard activeNotePaperID == nil, activeCanvasPaperID == nil else { return }
+        switch paper.documentKind {
+        case .note:
+            activeNotePaperID = paper.id
+            activeInputSurface = .note
+        case .canvas:
+            activeCanvasPaperID = paper.id
+            activeInputSurface = .canvas
+        }
     }
 
     @ViewBuilder
@@ -159,12 +185,15 @@ struct RootSplitView: View {
                 }
 
                 ZStack(alignment: .trailing) {
+                    if activeCanvasPaper == nil {
+                        emptyPaneState(kind: .canvas)
+                    } else {
                     CanvasView(drawing: $canvasDrawing,
                                contentOffset: $contentOffset,
                                resetTrigger: $canvasResetTrigger,
                                initialContentSize: CGSize(
-                                   width: activePaper.canvasContentWidth,
-                                   height: activePaper.canvasContentHeight),
+                                   width: activeCanvasPaper?.canvasContentWidth ?? 4000,
+                                   height: activeCanvasPaper?.canvasContentHeight ?? 4000),
                                scraps: sortedScraps,
                                palette: paletteCanvas,
                                background: canvasBackground,
@@ -188,6 +217,7 @@ struct RootSplitView: View {
                                onStrokeEnded: {
                                    paletteCanvas.isStrokeInProgress = false
                                })
+                    }
 
                     sideDock(palette: paletteCanvas, edge: .trailing)
                 }
@@ -197,11 +227,29 @@ struct RootSplitView: View {
     }
 
     @ViewBuilder
+    private func emptyPaneState(kind: PaperDocumentKind) -> some View {
+        VStack(spacing: Spacing.m) {
+            Image(systemName: kind.systemImage)
+                .font(.system(size: 36))
+                .foregroundStyle(Color.Ink.tertiary)
+            Text(kind == .note ? "노트가 선택되지 않았습니다" : "캔버스가 선택되지 않았습니다")
+                .font(AppType.callout)
+                .foregroundStyle(Color.Ink.secondary)
+            Text("상단 제목을 눌러 선택하거나 새로 추가하세요")
+                .font(AppType.caption)
+                .foregroundStyle(Color.Ink.tertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.Surface.subtle)
+    }
+
+    @ViewBuilder
     private var topBar: some View {
         SplitTopBar(
             noteTitle: noteDisplayTitle,
             canvasTitle: canvasDisplayTitle,
-            activePaperID: activePaper.id,
+            activeNotePaperID: activeNotePaperID,
+            activeCanvasPaperID: activeCanvasPaperID,
             documents: switchablePapers,
             documentSwitcherKind: documentSwitcherKind,
             pageIndex: currentPageIndex,
@@ -220,8 +268,9 @@ struct RootSplitView: View {
             onCreateDocument: createDocument(of:),
             canvasBackground: canvasBackground,
             onPickCanvasBackground: { type in
-                activePaper.canvasBackgroundRaw = type.rawValue
-                activePaper.updatedAt = .now
+                guard let canvas = activeCanvasPaper else { return }
+                canvas.canvasBackgroundRaw = type.rawValue
+                canvas.updatedAt = .now
                 scheduleSave()
             },
             debugActions: debugActions
@@ -235,11 +284,11 @@ struct RootSplitView: View {
     }
 
     private var noteDisplayTitle: String {
-        activePaper.documentKind == .note ? activePaper.title : "노트 선택"
+        activeNotePaper?.title ?? "노트 선택"
     }
 
     private var canvasDisplayTitle: String {
-        activePaper.documentKind == .canvas ? activePaper.title : "캔버스"
+        activeCanvasPaper?.title ?? "캔버스 선택"
     }
 
     @ViewBuilder
@@ -302,7 +351,7 @@ struct RootSplitView: View {
     }
 
     private var sortedScraps: [ScrapItem] {
-        activePaper.scrapItems.sorted(by: { $0.createdAt < $1.createdAt })
+        (activeCanvasPaper?.scrapItems ?? []).sorted(by: { $0.createdAt < $1.createdAt })
     }
 
     private func handlePencilTap() {
@@ -315,7 +364,7 @@ struct RootSplitView: View {
     }
 
     private func handleScrapTap(_ id: UUID) {
-        guard let scrap = activePaper.scrapItems.first(where: { $0.id == id }) else { return }
+        guard let scrap = (activeCanvasPaper?.scrapItems ?? []).first(where: { $0.id == id }) else { return }
         let rect = CGRect(x: scrap.sourceRectX,
                           y: scrap.sourceRectY,
                           width: scrap.sourceRectW,
@@ -340,9 +389,9 @@ struct RootSplitView: View {
             sourcePageIndex: pageIndex,
             sourceRect: pageRect
         )
-        scrap.document = activePaper
+        scrap.document = activeCanvasPaper
         modelContext.insert(scrap)
-        activePaper.updatedAt = .now
+        activeCanvasPaper?.updatedAt = .now
         scheduleSave()
     }
 
@@ -354,25 +403,25 @@ struct RootSplitView: View {
     }
 
     private func handleScrapMoved(_ id: UUID, _ position: CGPoint) {
-        guard let scrap = activePaper.scrapItems.first(where: { $0.id == id }) else { return }
+        guard let scrap = (activeCanvasPaper?.scrapItems ?? []).first(where: { $0.id == id }) else { return }
         scrap.positionX = Double(position.x)
         scrap.positionY = Double(position.y)
-        activePaper.updatedAt = .now
+        activeCanvasPaper?.updatedAt = .now
         scheduleSave()
     }
 
     private func handleScrapResized(_ id: UUID, _ size: CGSize) {
-        guard let scrap = activePaper.scrapItems.first(where: { $0.id == id }) else { return }
+        guard let scrap = (activeCanvasPaper?.scrapItems ?? []).first(where: { $0.id == id }) else { return }
         scrap.width = Double(size.width)
         scrap.height = Double(size.height)
-        activePaper.updatedAt = .now
+        activeCanvasPaper?.updatedAt = .now
         scheduleSave()
     }
 
     private func handleScrapDeleted(_ id: UUID) {
-        guard let scrap = activePaper.scrapItems.first(where: { $0.id == id }) else { return }
+        guard let scrap = (activeCanvasPaper?.scrapItems ?? []).first(where: { $0.id == id }) else { return }
         modelContext.delete(scrap)
-        activePaper.updatedAt = .now
+        activeCanvasPaper?.updatedAt = .now
         scheduleSave()
     }
 
@@ -387,9 +436,9 @@ struct RootSplitView: View {
             sourcePageIndex: payload.sourcePageIndex,
             sourceRect: payload.sourceRect
         )
-        scrap.document = activePaper
+        scrap.document = activeCanvasPaper
         modelContext.insert(scrap)
-        activePaper.updatedAt = .now
+        activeCanvasPaper?.updatedAt = .now
         scheduleSave()
     }
 
@@ -416,7 +465,7 @@ struct RootSplitView: View {
     }
 
     private func beginEditingTextNote(_ id: UUID) {
-        guard let scrap = activePaper.scrapItems.first(where: { $0.id == id }),
+        guard let scrap = (activeCanvasPaper?.scrapItems ?? []).first(where: { $0.id == id }),
               scrap.kind == .text else { return }
         textNoteDraft = CanvasTextNoteDraft(scrapID: id, text: scrap.text ?? "")
     }
@@ -429,7 +478,7 @@ struct RootSplitView: View {
         }
 
         if let scrapID = draft.scrapID,
-           let scrap = activePaper.scrapItems.first(where: { $0.id == scrapID }) {
+           let scrap = (activeCanvasPaper?.scrapItems ?? []).first(where: { $0.id == scrapID }) {
             scrap.text = text
             let estimated = estimateTextNoteSize(
                 for: text,
@@ -446,11 +495,11 @@ struct RootSplitView: View {
                 sourcePageIndex: currentPageIndex,
                 sourceRect: .zero
             )
-            scrap.document = activePaper
+            scrap.document = activeCanvasPaper
             modelContext.insert(scrap)
         }
 
-        activePaper.updatedAt = .now
+        activeCanvasPaper?.updatedAt = .now
         textNoteDraft = nil
         scheduleSave()
     }
@@ -471,13 +520,13 @@ struct RootSplitView: View {
         let position = nextDummyPosition()
         let scrap = ScrapItem(
             kind: .text,
-            text: "샘플 텍스트 스크랩 #\(activePaper.scrapItems.count + 1)\nPhase 2 Step 2 검증용",
+            text: "샘플 텍스트 스크랩 #\((activeCanvasPaper?.scrapItems ?? []).count + 1)\nPhase 2 Step 2 검증용",
             position: position,
             size: CGSize(width: 280, height: 120),
             sourcePageIndex: currentPageIndex,
             sourceRect: .zero
         )
-        scrap.document = activePaper
+        scrap.document = activeCanvasPaper
         modelContext.insert(scrap)
     }
 
@@ -488,7 +537,7 @@ struct RootSplitView: View {
         let image = renderer.image { ctx in
             UIColor.systemTeal.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
-            let label = "IMG #\(activePaper.scrapItems.count + 1)"
+            let label = "IMG #\((activeCanvasPaper?.scrapItems ?? []).count + 1)"
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 28, weight: .semibold),
                 .foregroundColor: UIColor.white
@@ -506,14 +555,14 @@ struct RootSplitView: View {
             sourcePageIndex: currentPageIndex,
             sourceRect: .zero
         )
-        scrap.document = activePaper
+        scrap.document = activeCanvasPaper
         modelContext.insert(scrap)
     }
 
     private func nextDummyPosition() -> CGPoint {
         let baseX = contentOffset.x + 80
         let baseY = contentOffset.y + 80
-        let jitter = CGFloat(activePaper.scrapItems.count % 5) * 24
+        let jitter = CGFloat((activeCanvasPaper?.scrapItems ?? []).count % 5) * 24
         return CGPoint(x: baseX + jitter, y: baseY + jitter)
     }
     #endif
@@ -538,14 +587,20 @@ struct RootSplitView: View {
 
     private func createDocument(of kind: PaperDocumentKind) {
         let title = nextBlankTitle(for: kind)
-        let paper = PaperDocument(title: title, kind: kind)
-        if let folder = activePaper.folder {
-            paper.folder = folder
+        let newPaper = PaperDocument(title: title, kind: kind)
+        let preferredFolder: PaperFolder? = {
+            switch kind {
+            case .note:   return activeNotePaper?.folder ?? activeCanvasPaper?.folder
+            case .canvas: return activeCanvasPaper?.folder ?? activeNotePaper?.folder
+            }
+        }()
+        if let folder = preferredFolder {
+            newPaper.folder = folder
             folder.updatedAt = .now
         }
-        modelContext.insert(paper)
+        modelContext.insert(newPaper)
         try? modelContext.save()
-        switchToPaper(paper)
+        switchToPaper(newPaper)
     }
 
     private func nextBlankTitle(for kind: PaperDocumentKind) -> String {
@@ -557,60 +612,69 @@ struct RootSplitView: View {
         return "\(base) \(idx)"
     }
 
+    /// Route the selection to the pane matching the paper's kind. The other
+    /// pane is untouched, so note and canvas live independently.
     private func switchToPaper(_ target: PaperDocument) {
-        guard target.id != activePaper.id else {
-            withAnimation(Motion.indirectFast) {
+        switch target.documentKind {
+        case .note:
+            guard target.id != activeNotePaperID else {
+                withAnimation(Motion.indirect) { documentSwitcherKind = nil }
+                return
+            }
+            saveTask?.cancel()
+            savedStatusResetTask?.cancel()
+            if didLoadNote { persistNote() }
+            accessingURL?.stopAccessingSecurityScopedResource()
+            accessingURL = nil
+            resetNotePane()
+            withAnimation(Motion.indirect) {
+                activeNotePaperID = target.id
                 documentSwitcherKind = nil
             }
-            return
-        }
-
-        saveTask?.cancel()
-        savedStatusResetTask?.cancel()
-        if didLoad { persist() }
-        accessingURL?.stopAccessingSecurityScopedResource()
-        accessingURL = nil
-
-        resetActivePaperSession()
-        withAnimation(Motion.indirectFast) {
-            activePaperID = target.id
-            documentSwitcherKind = nil
+        case .canvas:
+            guard target.id != activeCanvasPaperID else {
+                withAnimation(Motion.indirect) { documentSwitcherKind = nil }
+                return
+            }
+            saveTask?.cancel()
+            savedStatusResetTask?.cancel()
+            if didLoadCanvas { persistCanvas() }
+            resetCanvasPane()
+            withAnimation(Motion.indirect) {
+                activeCanvasPaperID = target.id
+                documentSwitcherKind = nil
+            }
         }
     }
 
-    private func resetActivePaperSession() {
+    private func resetNotePane() {
         pdfDocument = nil
-        canvasDrawing = PKDrawing()
         pdfInkStrokes = [:]
-        contentOffset = .zero
         currentPageIndex = 0
         navigationTarget = nil
-        canvasResetTrigger = UUID()
-        leftFraction = 0.5
         loadError = nil
-        didLoad = false
-        saveTask = nil
-        savedStatusResetTask = nil
-        saveStatus = .idle
-        canvasZoomScale = 1.0
-        showingPageJumpSheet = false
-        textNoteDraft = nil
+        didLoadNote = false
         palettePDF.isStrokeInProgress = false
+        showingPageJumpSheet = false
+    }
+
+    private func resetCanvasPane() {
+        canvasDrawing = PKDrawing()
+        contentOffset = .zero
+        canvasResetTrigger = UUID()
+        canvasZoomScale = 1.0
+        didLoadCanvas = false
         paletteCanvas.isStrokeInProgress = false
+        textNoteDraft = nil
         activeInputSurface = .canvas
     }
 
-    private func loadIfNeeded() async {
-        guard !didLoad else { return }
-        didLoad = true
+    private func loadNoteIfNeeded() async {
+        guard !didLoadNote, let note = activeNotePaper else { return }
+        didLoadNote = true
 
-        currentPageIndex = activePaper.lastPageIndex
-        contentOffset = CGPoint(x: activePaper.canvasOffsetX, y: activePaper.canvasOffsetY)
-        if let data = activePaper.drawingData,
-           let drawing = try? PKDrawing(data: data) {
-            canvasDrawing = drawing
-        }
-        pdfInkStrokes = resolvePageInkStrokes()
+        currentPageIndex = note.lastPageIndex
+        pdfInkStrokes = resolvePageInkStrokes(for: note)
 
         guard hasPDFSource else {
             pdfDocument = nil
@@ -618,7 +682,7 @@ struct RootSplitView: View {
             return
         }
 
-        guard let url = resolvePDFURL() else {
+        guard let url = resolvePDFURL(for: note) else {
             loadError = "PDF를 찾을 수 없습니다"
             return
         }
@@ -633,18 +697,31 @@ struct RootSplitView: View {
         }
     }
 
-    private func resolvePDFURL() -> URL? {
-        if let bookmark = activePaper.bookmarkData {
+    private func loadCanvasIfNeeded() async {
+        guard !didLoadCanvas, let canvas = activeCanvasPaper else { return }
+        didLoadCanvas = true
+
+        contentOffset = CGPoint(x: canvas.canvasOffsetX, y: canvas.canvasOffsetY)
+        if let data = canvas.drawingData,
+           let drawing = try? PKDrawing(data: data) {
+            canvasDrawing = drawing
+        } else {
+            canvasDrawing = PKDrawing()
+        }
+    }
+
+    private func resolvePDFURL(for note: PaperDocument) -> URL? {
+        if let bookmark = note.bookmarkData {
             var stale = false
             if let url = try? URL(resolvingBookmarkData: bookmark,
                                   bookmarkDataIsStale: &stale) {
                 if stale, let refreshed = try? url.bookmarkData() {
-                    activePaper.bookmarkData = refreshed
+                    note.bookmarkData = refreshed
                 }
                 return url
             }
         }
-        if let s = activePaper.sourceURLString {
+        if let s = note.sourceURLString {
             if s.hasPrefix("/") { return URL(fileURLWithPath: s) }
             if let u = URL(string: s), u.isFileURL { return u }
         }
@@ -652,17 +729,22 @@ struct RootSplitView: View {
     }
 
     private func scheduleSave() {
-        guard didLoad else { return }
+        guard didLoadNote || didLoadCanvas else { return }
         saveTask?.cancel()
         savedStatusResetTask?.cancel()
         saveStatus = .saving
         saveTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
-            persist()
+            persistAll()
             saveStatus = .saved(.now)
             scheduleSavedStatusReset()
         }
+    }
+
+    private func persistAll() {
+        if didLoadNote { persistNote() }
+        if didLoadCanvas { persistCanvas() }
     }
 
     private func scheduleSavedStatusReset() {
@@ -674,19 +756,25 @@ struct RootSplitView: View {
         }
     }
 
-    private func persist() {
-        activePaper.lastPageIndex = currentPageIndex
-        activePaper.canvasOffsetX = Double(contentOffset.x)
-        activePaper.canvasOffsetY = Double(contentOffset.y)
-        activePaper.drawingData = canvasDrawing.dataRepresentation()
-        syncPageInkModels()
-        activePaper.pdfInkData = nil
-        activePaper.updatedAt = .now
+    private func persistNote() {
+        guard let note = activeNotePaper else { return }
+        note.lastPageIndex = currentPageIndex
+        syncPageInkModels(into: note)
+        note.pdfInkData = nil
+        note.updatedAt = .now
     }
 
-    private func resolvePageInkStrokes() -> [Int: [InkStroke]] {
+    private func persistCanvas() {
+        guard let canvas = activeCanvasPaper else { return }
+        canvas.canvasOffsetX = Double(contentOffset.x)
+        canvas.canvasOffsetY = Double(contentOffset.y)
+        canvas.drawingData = canvasDrawing.dataRepresentation()
+        canvas.updatedAt = .now
+    }
+
+    private func resolvePageInkStrokes(for note: PaperDocument) -> [Int: [InkStroke]] {
         var strokesByPage: [Int: [InkStroke]] = [:]
-        for ink in activePaper.pageInks {
+        for ink in note.pageInks {
             if let strokes = try? JSONDecoder().decode([InkStroke].self, from: ink.drawingData),
                !strokes.isEmpty {
                 strokesByPage[ink.pageIndex] = strokes
@@ -698,7 +786,7 @@ struct RootSplitView: View {
             }
         }
         if strokesByPage.isEmpty,
-           let data = activePaper.pdfInkData,
+           let data = note.pdfInkData,
            !data.isEmpty,
            let legacyDrawing = try? PKDrawing(data: data) {
             let strokes = PKDrawingConverter.toInkStrokes(legacyDrawing)
@@ -709,9 +797,9 @@ struct RootSplitView: View {
         return strokesByPage
     }
 
-    private func syncPageInkModels() {
+    private func syncPageInkModels(into note: PaperDocument) {
         var existingByPage: [Int: PageInk] = [:]
-        for ink in activePaper.pageInks {
+        for ink in note.pageInks {
             if existingByPage[ink.pageIndex] == nil {
                 existingByPage[ink.pageIndex] = ink
             } else {
@@ -720,7 +808,7 @@ struct RootSplitView: View {
         }
 
         let activeStrokes = pdfInkStrokes.filter { !$0.value.isEmpty }
-        for ink in activePaper.pageInks where activeStrokes[ink.pageIndex] == nil {
+        for ink in note.pageInks where activeStrokes[ink.pageIndex] == nil {
             modelContext.delete(ink)
         }
 
@@ -729,10 +817,10 @@ struct RootSplitView: View {
             if let ink = existingByPage[pageIndex] {
                 ink.drawingData = data
                 ink.updatedAt = .now
-                ink.document = activePaper
+                ink.document = note
             } else {
                 let ink = PageInk(pageIndex: pageIndex, drawingData: data)
-                ink.document = activePaper
+                ink.document = note
                 modelContext.insert(ink)
             }
         }
@@ -741,7 +829,7 @@ struct RootSplitView: View {
     private func handleDisappear() {
         saveTask?.cancel()
         savedStatusResetTask?.cancel()
-        if didLoad { persist() }
+        persistAll()
         accessingURL?.stopAccessingSecurityScopedResource()
         accessingURL = nil
     }
