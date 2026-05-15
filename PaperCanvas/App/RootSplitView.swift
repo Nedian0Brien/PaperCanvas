@@ -82,6 +82,60 @@ struct RootSplitView: View {
     }
 
     var body: some View {
+        ZStack {
+            mainContent
+            documentSwitcherScrim
+        }
+        .ignoresSafeArea(.keyboard)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            topBar
+        }
+        .sheet(isPresented: $showingPageJumpSheet) {
+            if let pdfDocument {
+                PageJumpSheet(
+                    pdfDocument: pdfDocument,
+                    currentPageIndex: currentPageIndex,
+                    onSelect: { index in
+                        navigationTarget = PDFNavigationTarget(pageIndex: index, pageRect: .zero)
+                    }
+                )
+            }
+        }
+        .sheet(item: $textNoteDraft) { draft in
+            CanvasTextNoteSheet(
+                draft: draft,
+                onCancel: { textNoteDraft = nil },
+                onSave: saveTextNote
+            )
+        }
+        .task(id: activePaper.id) { await loadIfNeeded() }
+        .onChange(of: canvasDrawing) { _, _ in scheduleSave() }
+        .onChange(of: pdfInkStrokes) { _, _ in scheduleSave() }
+        .onChange(of: contentOffset) { _, _ in scheduleSave() }
+        .onChange(of: currentPageIndex) { _, _ in scheduleSave() }
+        .onDisappear { handleDisappear() }
+    }
+
+    @ViewBuilder
+    private var documentSwitcherScrim: some View {
+        if documentSwitcherKind != nil {
+            // Invisible tap target covering everything except the switcher panel
+            // itself. Tapping anywhere outside dismisses the panel — standard
+            // popover behavior. The panel lives inside the top bar's safeAreaInset
+            // overlay, which renders above this scrim, so its hit-testing wins.
+            Color.clear
+                .ignoresSafeArea()
+                .contentShape(.rect)
+                .onTapGesture {
+                    withAnimation(Motion.indirect) {
+                        documentSwitcherKind = nil
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
         GeometryReader { geo in
             let totalWidth = geo.size.width
             let leftWidth = max(totalWidth * minFraction,
@@ -140,67 +194,44 @@ struct RootSplitView: View {
                 .frame(width: canvasWidth)
             }
         }
-        .ignoresSafeArea(.keyboard)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            SplitTopBar(
-                noteTitle: noteDisplayTitle,
-                canvasTitle: canvasDisplayTitle,
-                activePaperID: activePaper.id,
-                documents: switchablePapers,
-                documentSwitcherKind: documentSwitcherKind,
-                pageIndex: currentPageIndex,
-                totalPages: pdfDocument?.pageCount ?? 0,
-                canvasZoom: canvasZoomScale,
-                onLibraryTap: {
-                    handleDisappear()
-                    dismiss()
-                },
-                onPageJumpTap: { showingPageJumpSheet = true },
-                onZoomReset: { canvasResetTrigger = UUID() },
-                onRecenterCanvas: { canvasResetTrigger = UUID() },
-                onAddTextNote: beginAddingTextNote,
-                onToggleDocumentSwitcher: toggleDocumentSwitcher,
-                onSelectDocument: switchToPaper,
-                onCreateDocument: createDocument(of:),
-                canvasBackground: canvasBackground,
-                onPickCanvasBackground: { type in
-                    activePaper.canvasBackgroundRaw = type.rawValue
-                    activePaper.updatedAt = .now
-                    scheduleSave()
-                },
-                debugActions: debugActions
-            )
-            .padding(.horizontal, TopBarMetrics.outerHorizontalPadding)
-            .padding(.top, TopBarMetrics.outerTopPadding)
-            .padding(.bottom, TopBarMetrics.outerBottomPadding)
-            .opacity(chromeOpacity)
-            .animation(Motion.chromeFade, value: chromeOpacity)
-            .allowsHitTesting(chromeOpacity > 0.05)
-        }
-        .sheet(isPresented: $showingPageJumpSheet) {
-            if let pdfDocument {
-                PageJumpSheet(
-                    pdfDocument: pdfDocument,
-                    currentPageIndex: currentPageIndex,
-                    onSelect: { index in
-                        navigationTarget = PDFNavigationTarget(pageIndex: index, pageRect: .zero)
-                    }
-                )
-            }
-        }
-        .sheet(item: $textNoteDraft) { draft in
-            CanvasTextNoteSheet(
-                draft: draft,
-                onCancel: { textNoteDraft = nil },
-                onSave: saveTextNote
-            )
-        }
-        .task(id: activePaper.id) { await loadIfNeeded() }
-        .onChange(of: canvasDrawing) { _, _ in scheduleSave() }
-        .onChange(of: pdfInkStrokes) { _, _ in scheduleSave() }
-        .onChange(of: contentOffset) { _, _ in scheduleSave() }
-        .onChange(of: currentPageIndex) { _, _ in scheduleSave() }
-        .onDisappear { handleDisappear() }
+    }
+
+    @ViewBuilder
+    private var topBar: some View {
+        SplitTopBar(
+            noteTitle: noteDisplayTitle,
+            canvasTitle: canvasDisplayTitle,
+            activePaperID: activePaper.id,
+            documents: switchablePapers,
+            documentSwitcherKind: documentSwitcherKind,
+            pageIndex: currentPageIndex,
+            totalPages: pdfDocument?.pageCount ?? 0,
+            canvasZoom: canvasZoomScale,
+            onLibraryTap: {
+                handleDisappear()
+                dismiss()
+            },
+            onPageJumpTap: { showingPageJumpSheet = true },
+            onZoomReset: { canvasResetTrigger = UUID() },
+            onRecenterCanvas: { canvasResetTrigger = UUID() },
+            onAddTextNote: beginAddingTextNote,
+            onToggleDocumentSwitcher: toggleDocumentSwitcher,
+            onSelectDocument: switchToPaper,
+            onCreateDocument: createDocument(of:),
+            canvasBackground: canvasBackground,
+            onPickCanvasBackground: { type in
+                activePaper.canvasBackgroundRaw = type.rawValue
+                activePaper.updatedAt = .now
+                scheduleSave()
+            },
+            debugActions: debugActions
+        )
+        .padding(.horizontal, TopBarMetrics.outerHorizontalPadding)
+        .padding(.top, TopBarMetrics.outerTopPadding)
+        .padding(.bottom, TopBarMetrics.outerBottomPadding)
+        .opacity(chromeOpacity)
+        .animation(Motion.chromeFade, value: chromeOpacity)
+        .allowsHitTesting(chromeOpacity > 0.05)
     }
 
     private var noteDisplayTitle: String {
