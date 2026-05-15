@@ -38,7 +38,6 @@ struct RootSplitView: View {
     @State private var textNoteDraft: CanvasTextNoteDraft?
     @State private var savedStatusResetTask: Task<Void, Never>?
     @State private var documentSwitcherKind: PaperDocumentKind?
-    @Namespace private var documentSwitcherNamespace
     @AppStorage("PaperCanvas.autoHideTopBar") private var autoHideTopBar = false
 
     private var activePaper: PaperDocument {
@@ -149,7 +148,6 @@ struct RootSplitView: View {
                 activePaperID: activePaper.id,
                 documents: switchablePapers,
                 documentSwitcherKind: documentSwitcherKind,
-                documentSwitcherNamespace: documentSwitcherNamespace,
                 pageIndex: currentPageIndex,
                 totalPages: pdfDocument?.pageCount ?? 0,
                 canvasZoom: canvasZoomScale,
@@ -162,7 +160,6 @@ struct RootSplitView: View {
                 onRecenterCanvas: { canvasResetTrigger = UUID() },
                 onAddTextNote: beginAddingTextNote,
                 onToggleDocumentSwitcher: toggleDocumentSwitcher,
-                onSelectDocumentSwitcherKind: selectDocumentSwitcherKind,
                 onSelectDocument: switchToPaper,
                 canvasBackground: canvasBackground,
                 onPickCanvasBackground: { type in
@@ -501,12 +498,6 @@ struct RootSplitView: View {
     private func toggleDocumentSwitcher(_ kind: PaperDocumentKind) {
         withAnimation(Motion.indirectFast) {
             documentSwitcherKind = documentSwitcherKind == kind ? nil : kind
-        }
-    }
-
-    private func selectDocumentSwitcherKind(_ kind: PaperDocumentKind) {
-        withAnimation(Motion.indirectFast) {
-            documentSwitcherKind = kind
         }
     }
 

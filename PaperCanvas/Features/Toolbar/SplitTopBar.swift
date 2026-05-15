@@ -1,26 +1,11 @@
 import SwiftUI
 
-private enum DocumentSwitcherGlassID: Hashable, Sendable {
-    case note
-    case canvas
-
-    init(kind: PaperDocumentKind) {
-        switch kind {
-        case .note:
-            self = .note
-        case .canvas:
-            self = .canvas
-        }
-    }
-}
-
 struct SplitTopBar: View {
     let noteTitle: String
     let canvasTitle: String
     let activePaperID: UUID
     let documents: [PaperDocument]
     var documentSwitcherKind: PaperDocumentKind?
-    let documentSwitcherNamespace: Namespace.ID
 
     var pageIndex: Int = 0
     var totalPages: Int = 0
@@ -32,7 +17,6 @@ struct SplitTopBar: View {
     var onRecenterCanvas: () -> Void = {}
     var onAddTextNote: () -> Void = {}
     var onToggleDocumentSwitcher: (PaperDocumentKind) -> Void = { _ in }
-    var onSelectDocumentSwitcherKind: (PaperDocumentKind) -> Void = { _ in }
     var onSelectDocument: (PaperDocument) -> Void = { _ in }
 
     var canvasBackground: CanvasBackground = .dots
@@ -49,34 +33,36 @@ struct SplitTopBar: View {
 
     var body: some View {
         GlassEffectContainer(spacing: 8) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    leadingCluster
-                    Spacer(minLength: 0)
-                    trailingCluster
-                }
-
-                if let documentSwitcherKind {
-                    DocumentSwitcherPanel(
-                        selectedKind: documentSwitcherKind,
-                        documents: documents,
-                        activePaperID: activePaperID,
-                        onKindChange: onSelectDocumentSwitcherKind,
-                        onSelectDocument: onSelectDocument
-                    )
-                    .glassEffect(.regular.interactive(),
-                                 in: .rect(cornerRadius: Radius.xl))
-                    .glassEffectID(DocumentSwitcherGlassID(kind: documentSwitcherKind),
-                                   in: documentSwitcherNamespace)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .topLeading)),
-                        removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading))
-                    ))
-                }
+            HStack(spacing: 8) {
+                leadingCluster
+                Spacer(minLength: 0)
+                trailingCluster
             }
         }
         .frame(maxWidth: .infinity, minHeight: TopBarMetrics.barHeight)
-        .animation(Motion.indirectFast, value: documentSwitcherKind)
+    }
+
+    private func switcherBinding(for kind: PaperDocumentKind) -> Binding<Bool> {
+        Binding(
+            get: { documentSwitcherKind == kind },
+            set: { isShown in
+                let isCurrentlyOpen = documentSwitcherKind == kind
+                if isShown != isCurrentlyOpen {
+                    onToggleDocumentSwitcher(kind)
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func switcherPopover(for kind: PaperDocumentKind) -> some View {
+        DocumentSwitcherPanel(
+            selectedKind: kind,
+            documents: documents,
+            activePaperID: activePaperID,
+            onSelectDocument: onSelectDocument
+        )
+        .presentationCompactAdaptation(.popover)
     }
 
     // MARK: - Leading: library + note identity
@@ -126,6 +112,13 @@ struct SplitTopBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("노트 선택기")
+            .popover(
+                isPresented: switcherBinding(for: .note),
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .top
+            ) {
+                switcherPopover(for: .note)
+            }
 
             if hasPDF {
                 divider
@@ -168,7 +161,6 @@ struct SplitTopBar: View {
         .padding(.trailing, 2)
         .frame(minHeight: TopBarMetrics.buttonSize)
         .glassEffect(.regular.interactive(), in: .capsule)
-        .glassEffectID(glassID(for: .note), in: documentSwitcherNamespace)
         .layoutPriority(2)
     }
 
@@ -201,6 +193,13 @@ struct SplitTopBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("캔버스 선택기")
+            .popover(
+                isPresented: switcherBinding(for: .canvas),
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .top
+            ) {
+                switcherPopover(for: .canvas)
+            }
 
             divider
 
@@ -251,12 +250,7 @@ struct SplitTopBar: View {
         .padding(.trailing, 2)
         .frame(minHeight: TopBarMetrics.buttonSize)
         .glassEffect(.regular.interactive(), in: .capsule)
-        .glassEffectID(glassID(for: .canvas), in: documentSwitcherNamespace)
         .layoutPriority(2)
-    }
-
-    private func glassID(for kind: PaperDocumentKind) -> DocumentSwitcherGlassID? {
-        documentSwitcherKind == kind ? nil : DocumentSwitcherGlassID(kind: kind)
     }
 
     private var divider: some View {
@@ -270,7 +264,6 @@ private struct DocumentSwitcherPanel: View {
     let selectedKind: PaperDocumentKind
     let documents: [PaperDocument]
     let activePaperID: UUID
-    let onKindChange: (PaperDocumentKind) -> Void
     let onSelectDocument: (PaperDocument) -> Void
 
     private var visibleDocuments: [PaperDocument] {
@@ -279,13 +272,6 @@ private struct DocumentSwitcherPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
-            HStack(spacing: Spacing.s) {
-                kindButton(.note)
-                kindButton(.canvas)
-            }
-
-            Divider()
-
             if visibleDocuments.isEmpty {
                 Label(emptyText, systemImage: selectedKind.systemImage)
                     .font(AppType.callout)
@@ -323,25 +309,6 @@ private struct DocumentSwitcherPanel: View {
         }
     }
 
-    private func kindButton(_ kind: PaperDocumentKind) -> some View {
-        Button {
-            onKindChange(kind)
-        } label: {
-            Label(kind.label, systemImage: kind.systemImage)
-                .font(AppType.callout)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(selectedKind == kind ? Color.Ink.primary : Color.Ink.secondary)
-        .background {
-            if selectedKind == kind {
-                Capsule()
-                    .fill(Color.AccentTokens.tint)
-            }
-        }
-    }
 }
 
 private struct DocumentSwitcherRow: View {
