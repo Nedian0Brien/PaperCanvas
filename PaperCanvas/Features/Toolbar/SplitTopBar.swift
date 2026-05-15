@@ -58,11 +58,12 @@ struct SplitTopBar: View {
         .animation(Motion.indirectFast, value: documentSwitcherKind)
     }
 
-    /// Liquid Glass morph requires the collapsed capsule and the expanded panel
-    /// to be **mutually exclusive in the view tree** (Apple WWDC25 "Meet Liquid
-    /// Glass" — "Do not use opacity or hidden to conditionally show glass"),
-    /// sharing the same `Namespace` and `glassEffectID`. SwiftUI then interpolates
-    /// the single Liquid Glass element from the capsule frame to the panel frame.
+    /// Frame morph between the title capsule and the expanded panel is driven by
+    /// `matchedGeometryEffect`. `glassEffectID` alone does not interpolate frames —
+    /// it only manages Liquid Glass element identity for the GlassEffectContainer
+    /// union/separation merge (Apple docs / createwithswift.com). `glassEffect` is
+    /// applied independently on each branch so the glass material reshapes itself
+    /// to the current frame on every animation frame.
     @ViewBuilder
     private func morphedPanel(for kind: PaperDocumentKind) -> some View {
         DocumentSwitcherPanel(
@@ -74,8 +75,6 @@ struct SplitTopBar: View {
         )
         .glassEffect(.regular.interactive(),
                      in: .rect(cornerRadius: Radius.xl))
-        .glassEffectID(DocumentSwitcherGlassID(kind: kind),
-                       in: documentSwitcherNamespace)
     }
 
     // MARK: - Leading: library + note identity
@@ -106,13 +105,16 @@ struct SplitTopBar: View {
                     .opacity(0)
                     .accessibilityHidden(true)
                     .overlay(alignment: .topLeading) {
-                        morphedPanel(for: .note).fixedSize()
+                        morphedPanel(for: .note)
+                            .matchedGeometryEffect(id: DocumentSwitcherGlassID.note,
+                                                   in: documentSwitcherNamespace)
+                            .fixedSize()
                     }
             } else {
                 noteIdentityContent
                     .glassEffect(.regular.interactive(), in: .capsule)
-                    .glassEffectID(DocumentSwitcherGlassID.note,
-                                   in: documentSwitcherNamespace)
+                    .matchedGeometryEffect(id: DocumentSwitcherGlassID.note,
+                                           in: documentSwitcherNamespace)
             }
         }
         .layoutPriority(2)
@@ -198,13 +200,16 @@ struct SplitTopBar: View {
                     .opacity(0)
                     .accessibilityHidden(true)
                     .overlay(alignment: .topTrailing) {
-                        morphedPanel(for: .canvas).fixedSize()
+                        morphedPanel(for: .canvas)
+                            .matchedGeometryEffect(id: DocumentSwitcherGlassID.canvas,
+                                                   in: documentSwitcherNamespace)
+                            .fixedSize()
                     }
             } else {
                 trailingClusterContent
                     .glassEffect(.regular.interactive(), in: .capsule)
-                    .glassEffectID(DocumentSwitcherGlassID.canvas,
-                                   in: documentSwitcherNamespace)
+                    .matchedGeometryEffect(id: DocumentSwitcherGlassID.canvas,
+                                           in: documentSwitcherNamespace)
             }
         }
         .layoutPriority(2)

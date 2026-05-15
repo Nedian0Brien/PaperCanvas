@@ -497,7 +497,10 @@ struct RootSplitView: View {
     }
 
     private func toggleDocumentSwitcher(_ kind: PaperDocumentKind) {
-        withAnimation(Motion.indirectFast) {
+        // Spring is required so that matchedGeometryEffect interpolation between
+        // the title capsule and the expanded panel is actually visible — a 180ms
+        // easeInOut completes before the user can perceive the morph.
+        withAnimation(Motion.indirect) {
             documentSwitcherKind = documentSwitcherKind == kind ? nil : kind
         }
     }
