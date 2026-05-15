@@ -161,6 +161,7 @@ struct RootSplitView: View {
                 onAddTextNote: beginAddingTextNote,
                 onToggleDocumentSwitcher: toggleDocumentSwitcher,
                 onSelectDocument: switchToPaper,
+                onCreateDocument: createDocument(of:),
                 canvasBackground: canvasBackground,
                 onPickCanvasBackground: { type in
                     activePaper.canvasBackgroundRaw = type.rawValue
@@ -499,6 +500,27 @@ struct RootSplitView: View {
         withAnimation(Motion.indirectFast) {
             documentSwitcherKind = documentSwitcherKind == kind ? nil : kind
         }
+    }
+
+    private func createDocument(of kind: PaperDocumentKind) {
+        let title = nextBlankTitle(for: kind)
+        let paper = PaperDocument(title: title, kind: kind)
+        if let folder = activePaper.folder {
+            paper.folder = folder
+            folder.updatedAt = .now
+        }
+        modelContext.insert(paper)
+        try? modelContext.save()
+        switchToPaper(paper)
+    }
+
+    private func nextBlankTitle(for kind: PaperDocumentKind) -> String {
+        let base = kind == .note ? "새 노트" : "새 캔버스"
+        let titles = Set(libraryPapers.map(\.title))
+        if !titles.contains(base) { return base }
+        var idx = 2
+        while titles.contains("\(base) \(idx)") { idx += 1 }
+        return "\(base) \(idx)"
     }
 
     private func switchToPaper(_ target: PaperDocument) {

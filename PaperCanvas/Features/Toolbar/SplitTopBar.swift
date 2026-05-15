@@ -30,6 +30,7 @@ struct SplitTopBar: View {
     var onAddTextNote: () -> Void = {}
     var onToggleDocumentSwitcher: (PaperDocumentKind) -> Void = { _ in }
     var onSelectDocument: (PaperDocument) -> Void = { _ in }
+    var onCreateDocument: (PaperDocumentKind) -> Void = { _ in }
 
     var canvasBackground: CanvasBackground = .dots
     var onPickCanvasBackground: (CanvasBackground) -> Void = { _ in }
@@ -71,16 +72,13 @@ struct SplitTopBar: View {
             selectedKind: kind,
             documents: documents,
             activePaperID: activePaperID,
-            onSelectDocument: onSelectDocument
+            onSelectDocument: onSelectDocument,
+            onCreateDocument: { onCreateDocument(kind) }
         )
         .glassEffect(.regular.interactive(),
                      in: .rect(cornerRadius: Radius.xl))
         .glassEffectID(DocumentSwitcherGlassID(kind: kind),
                        in: documentSwitcherNamespace)
-        .transition(.asymmetric(
-            insertion: .opacity.combined(with: .scale(scale: 0.98)),
-            removal: .opacity.combined(with: .scale(scale: 0.98))
-        ))
     }
 
     // MARK: - Leading: library + note identity
@@ -171,9 +169,10 @@ struct SplitTopBar: View {
         .padding(.leading, 4)
         .padding(.trailing, 2)
         .frame(minHeight: TopBarMetrics.buttonSize)
-        .opacity(documentSwitcherKind == .note ? 0 : 1)
         .glassEffect(.regular.interactive(), in: .capsule)
         .glassEffectID(capsuleGlassID(for: .note), in: documentSwitcherNamespace)
+        .compositingGroup()
+        .opacity(documentSwitcherKind == .note ? 0 : 1)
         .overlay(alignment: .topLeading) {
             if documentSwitcherKind == .note {
                 morphedPanel(for: .note)
@@ -261,9 +260,10 @@ struct SplitTopBar: View {
         .padding(.leading, 4)
         .padding(.trailing, 2)
         .frame(minHeight: TopBarMetrics.buttonSize)
-        .opacity(documentSwitcherKind == .canvas ? 0 : 1)
         .glassEffect(.regular.interactive(), in: .capsule)
         .glassEffectID(capsuleGlassID(for: .canvas), in: documentSwitcherNamespace)
+        .compositingGroup()
+        .opacity(documentSwitcherKind == .canvas ? 0 : 1)
         .overlay(alignment: .topTrailing) {
             if documentSwitcherKind == .canvas {
                 morphedPanel(for: .canvas)
@@ -285,98 +285,133 @@ private struct DocumentSwitcherPanel: View {
     let documents: [PaperDocument]
     let activePaperID: UUID
     let onSelectDocument: (PaperDocument) -> Void
+    let onCreateDocument: () -> Void
 
     private var visibleDocuments: [PaperDocument] {
         documents.filter { $0.documentKind == selectedKind }
     }
 
+    private let columns = [
+        GridItem(.flexible(), spacing: Spacing.s),
+        GridItem(.flexible(), spacing: Spacing.s)
+    ]
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.m) {
-            if visibleDocuments.isEmpty {
-                Label(emptyText, systemImage: selectedKind.systemImage)
-                    .font(AppType.callout)
-                    .foregroundStyle(Color.Ink.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 88)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        ForEach(visibleDocuments) { document in
-                            Button {
-                                onSelectDocument(document)
-                            } label: {
-                                DocumentSwitcherRow(
-                                    document: document,
-                                    isActive: document.id == activePaperID
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: Spacing.s) {
+                NewDocumentCard(kind: selectedKind, action: onCreateDocument)
+
+                ForEach(visibleDocuments) { document in
+                    Button {
+                        onSelectDocument(document)
+                    } label: {
+                        DocumentSwitcherCard(
+                            document: document,
+                            isActive: document.id == activePaperID
+                        )
                     }
+                    .buttonStyle(.plain)
                 }
-                .frame(maxHeight: 280)
             }
+            .padding(Spacing.m)
         }
-        .padding(Spacing.m)
-        .frame(width: 360)
+        .frame(width: 420)
+        .frame(maxHeight: 520)
     }
-
-    private var emptyText: String {
-        switch selectedKind {
-        case .note:
-            return "선택할 노트가 없습니다"
-        case .canvas:
-            return "선택할 캔버스가 없습니다"
-        }
-    }
-
 }
 
-private struct DocumentSwitcherRow: View {
+private struct DocumentSwitcherCard: View {
     let document: PaperDocument
     let isActive: Bool
 
+    @State private var thumbnail: UIImage?
+
+    private var thumbnailKey: String {
+        "\(document.id.uuidString)-\(document.updatedAt.timeIntervalSince1970)"
+    }
+
     var body: some View {
-        HStack(spacing: Spacing.s) {
-            Image(systemName: document.documentKind.systemImage)
-                .font(AppType.toolGlyph)
-                .foregroundStyle(isActive ? Color.AccentTokens.primary : Color.Ink.secondary)
-                .frame(width: 32, height: 32)
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack {
+                RoundedRectangle(cornerRadius: Radius.m, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+
+                if let thumbnail {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+                } else {
+                    Image(systemName: document.documentKind.systemImage)
+                        .font(.system(size: 28))
+                        .foregroundStyle(Color.Ink.tertiary)
+                }
+            }
+            .frame(height: 140)
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.m, style: .continuous)
+                    .strokeBorder(isActive ? Color.AccentTokens.primary : Color.Rule.hairline,
+                                  lineWidth: isActive ? 2 : 1)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(document.title)
                     .font(AppType.callout)
                     .foregroundStyle(Color.Ink.primary)
                     .lineLimit(1)
+                    .truncationMode(.tail)
 
-                HStack(spacing: 6) {
-                    Text(document.documentKind.label)
-                    if let folderName = document.folder?.name {
-                        Text("·")
-                        Text(folderName)
-                    }
-                    Text("·")
-                    Text(document.updatedAt, format: .relative(presentation: .named))
-                }
-                .font(AppType.caption)
-                .foregroundStyle(Color.Ink.secondary)
-                .lineLimit(1)
-            }
-
-            Spacer()
-
-            if isActive {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(Color.AccentTokens.primary)
+                Text(document.updatedAt, format: .relative(presentation: .named))
+                    .font(AppType.caption)
+                    .foregroundStyle(Color.Ink.tertiary)
+                    .lineLimit(1)
             }
         }
-        .padding(.horizontal, Spacing.s)
-        .padding(.vertical, 8)
-        .background {
-            if isActive {
-                RoundedRectangle(cornerRadius: Radius.m)
-                    .fill(Color.AccentTokens.tint)
-            }
-        }
+        .padding(.bottom, 4)
         .contentShape(.rect)
+        .task(id: thumbnailKey) {
+            thumbnail = PaperThumbnailService.shared.thumbnail(for: document)
+            if thumbnail == nil {
+                await PaperThumbnailService.shared.generateIfNeeded(for: document)
+                thumbnail = PaperThumbnailService.shared.thumbnail(for: document)
+            }
+        }
+    }
+}
+
+private struct NewDocumentCard: View {
+    let kind: PaperDocumentKind
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Radius.m, style: .continuous)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                        .foregroundStyle(Color.Ink.tertiary)
+                    Image(systemName: "plus")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(Color.Ink.secondary)
+                }
+                .frame(height: 140)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(kind == .note ? "새 노트" : "새 캔버스")
+                        .font(AppType.callout)
+                        .foregroundStyle(Color.Ink.primary)
+                        .lineLimit(1)
+
+                    Text("탭하여 추가")
+                        .font(AppType.caption)
+                        .foregroundStyle(Color.Ink.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.bottom, 4)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(kind == .note ? "새 노트 추가" : "새 캔버스 추가")
     }
 }
