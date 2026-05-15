@@ -58,14 +58,11 @@ struct SplitTopBar: View {
         .animation(Motion.indirectFast, value: documentSwitcherKind)
     }
 
-    /// Identity used to morph the title capsule into the expanded switcher panel
-    /// in the same `GlassEffectContainer`. The capsule emits `kind` while collapsed
-    /// and `nil` while expanded; the panel emits `kind`. The Liquid Glass system
-    /// matches the two and animates a single element between the two shapes.
-    private func capsuleGlassID(for kind: PaperDocumentKind) -> DocumentSwitcherGlassID? {
-        documentSwitcherKind == kind ? nil : DocumentSwitcherGlassID(kind: kind)
-    }
-
+    /// Liquid Glass morph requires the collapsed capsule and the expanded panel
+    /// to be **mutually exclusive in the view tree** (Apple WWDC25 "Meet Liquid
+    /// Glass" — "Do not use opacity or hidden to conditionally show glass"),
+    /// sharing the same `Namespace` and `glassEffectID`. SwiftUI then interpolates
+    /// the single Liquid Glass element from the capsule frame to the panel frame.
     @ViewBuilder
     private func morphedPanel(for kind: PaperDocumentKind) -> some View {
         DocumentSwitcherPanel(
@@ -103,6 +100,26 @@ struct SplitTopBar: View {
 
     @ViewBuilder
     private var noteIdentity: some View {
+        Group {
+            if documentSwitcherKind == .note {
+                noteIdentityContent
+                    .opacity(0)
+                    .accessibilityHidden(true)
+                    .overlay(alignment: .topLeading) {
+                        morphedPanel(for: .note).fixedSize()
+                    }
+            } else {
+                noteIdentityContent
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .glassEffectID(DocumentSwitcherGlassID.note,
+                                   in: documentSwitcherNamespace)
+            }
+        }
+        .layoutPriority(2)
+    }
+
+    @ViewBuilder
+    private var noteIdentityContent: some View {
         HStack(spacing: 4) {
             Button {
                 onToggleDocumentSwitcher(.note)
@@ -169,23 +186,32 @@ struct SplitTopBar: View {
         .padding(.leading, 4)
         .padding(.trailing, 2)
         .frame(minHeight: TopBarMetrics.buttonSize)
-        .glassEffect(.regular.interactive(), in: .capsule)
-        .glassEffectID(capsuleGlassID(for: .note), in: documentSwitcherNamespace)
-        .compositingGroup()
-        .opacity(documentSwitcherKind == .note ? 0 : 1)
-        .overlay(alignment: .topLeading) {
-            if documentSwitcherKind == .note {
-                morphedPanel(for: .note)
-                    .fixedSize()
-            }
-        }
-        .layoutPriority(2)
     }
 
     // MARK: - Trailing: canvas identity
 
     @ViewBuilder
     private var trailingCluster: some View {
+        Group {
+            if documentSwitcherKind == .canvas {
+                trailingClusterContent
+                    .opacity(0)
+                    .accessibilityHidden(true)
+                    .overlay(alignment: .topTrailing) {
+                        morphedPanel(for: .canvas).fixedSize()
+                    }
+            } else {
+                trailingClusterContent
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .glassEffectID(DocumentSwitcherGlassID.canvas,
+                                   in: documentSwitcherNamespace)
+            }
+        }
+        .layoutPriority(2)
+    }
+
+    @ViewBuilder
+    private var trailingClusterContent: some View {
         HStack(spacing: 4) {
             Button {
                 onToggleDocumentSwitcher(.canvas)
@@ -260,17 +286,6 @@ struct SplitTopBar: View {
         .padding(.leading, 4)
         .padding(.trailing, 2)
         .frame(minHeight: TopBarMetrics.buttonSize)
-        .glassEffect(.regular.interactive(), in: .capsule)
-        .glassEffectID(capsuleGlassID(for: .canvas), in: documentSwitcherNamespace)
-        .compositingGroup()
-        .opacity(documentSwitcherKind == .canvas ? 0 : 1)
-        .overlay(alignment: .topTrailing) {
-            if documentSwitcherKind == .canvas {
-                morphedPanel(for: .canvas)
-                    .fixedSize()
-            }
-        }
-        .layoutPriority(2)
     }
 
     private var divider: some View {
@@ -297,26 +312,67 @@ private struct DocumentSwitcherPanel: View {
     ]
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: Spacing.s) {
-                NewDocumentCard(kind: selectedKind, action: onCreateDocument)
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            HStack {
+                Spacer()
+                createPill
+            }
+            .padding(.horizontal, Spacing.m)
+            .padding(.top, Spacing.m)
 
-                ForEach(visibleDocuments) { document in
-                    Button {
-                        onSelectDocument(document)
-                    } label: {
-                        DocumentSwitcherCard(
-                            document: document,
-                            isActive: document.id == activePaperID
-                        )
+            if visibleDocuments.isEmpty {
+                emptyState
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: Spacing.s) {
+                        ForEach(visibleDocuments) { document in
+                            Button {
+                                onSelectDocument(document)
+                            } label: {
+                                DocumentSwitcherCard(
+                                    document: document,
+                                    isActive: document.id == activePaperID
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, Spacing.m)
+                    .padding(.bottom, Spacing.m)
                 }
             }
-            .padding(Spacing.m)
         }
         .frame(width: 420)
-        .frame(maxHeight: 520)
+        .frame(maxHeight: 540)
+    }
+
+    private var createPill: some View {
+        Button(action: onCreateDocument) {
+            HStack(spacing: 6) {
+                Image(systemName: "plus")
+                Text(selectedKind == .note ? "새 노트" : "새 캔버스")
+            }
+            .font(AppType.callout.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Capsule().fill(Color.AccentTokens.primary))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(selectedKind == .note ? "새 노트 추가" : "새 캔버스 추가")
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: Spacing.s) {
+            Image(systemName: selectedKind.systemImage)
+                .font(.system(size: 32))
+                .foregroundStyle(Color.Ink.tertiary)
+            Text(selectedKind == .note ? "노트가 없습니다" : "캔버스가 없습니다")
+                .font(AppType.callout)
+                .foregroundStyle(Color.Ink.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 160)
+        .padding(.bottom, Spacing.m)
     }
 }
 
@@ -379,39 +435,3 @@ private struct DocumentSwitcherCard: View {
     }
 }
 
-private struct NewDocumentCard: View {
-    let kind: PaperDocumentKind
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: Radius.m, style: .continuous)
-                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
-                        .foregroundStyle(Color.Ink.tertiary)
-                    Image(systemName: "plus")
-                        .font(.system(size: 28, weight: .medium))
-                        .foregroundStyle(Color.Ink.secondary)
-                }
-                .frame(height: 140)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(kind == .note ? "새 노트" : "새 캔버스")
-                        .font(AppType.callout)
-                        .foregroundStyle(Color.Ink.primary)
-                        .lineLimit(1)
-
-                    Text("탭하여 추가")
-                        .font(AppType.caption)
-                        .foregroundStyle(Color.Ink.tertiary)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.bottom, 4)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(kind == .note ? "새 노트 추가" : "새 캔버스 추가")
-    }
-}
