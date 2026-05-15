@@ -151,69 +151,6 @@ enum PenKind: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-enum EraserMode: String, CaseIterable, Identifiable, Codable {
-    case pixel
-    case element
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .pixel:   return "픽셀 지우개"
-        case .element: return "요소 지우개"
-        }
-    }
-
-    var shortLabel: String {
-        switch self {
-        case .pixel:   return "픽셀"
-        case .element: return "요소"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .pixel:   return "square.grid.3x3"
-        case .element: return "eraser"
-        }
-    }
-
-    var eraserType: PKEraserTool.EraserType {
-        switch self {
-        case .pixel:   return .bitmap
-        case .element: return .vector
-        }
-    }
-}
-
-enum LassoMode: String, CaseIterable, Identifiable, Codable {
-    case freeform
-    case rectangle
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .freeform:  return "자유 올가미"
-        case .rectangle: return "직사각형 올가미"
-        }
-    }
-
-    var shortLabel: String {
-        switch self {
-        case .freeform:  return "자유"
-        case .rectangle: return "직각"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .freeform:  return "lasso"
-        case .rectangle: return "rectangle.dashed"
-        }
-    }
-}
-
 enum ActiveCanvas: String, Codable {
     case main
     case pdfInk
@@ -243,20 +180,6 @@ final class PaletteState {
                 penWidths[oldValue] = width
                 width = penWidths[penKind] ?? penKind.defaultWidth
             }
-            save()
-        }
-    }
-
-    var eraserMode: EraserMode = .element {
-        didSet {
-            guard eraserMode != oldValue else { return }
-            save()
-        }
-    }
-
-    var lassoMode: LassoMode = .freeform {
-        didSet {
-            guard lassoMode != oldValue else { return }
             save()
         }
     }
@@ -342,18 +265,6 @@ final class PaletteState {
         UIImpactFeedbackGenerator(style: kind.hapticStyle).impactOccurred()
     }
 
-    func setEraserMode(_ mode: EraserMode) {
-        guard eraserMode != mode else { return }
-        eraserMode = mode
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-
-    func setLassoMode(_ mode: LassoMode) {
-        guard lassoMode != mode else { return }
-        lassoMode = mode
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-
     func setPresetColor(_ color: Color, atIndex index: Int) {
         guard presetColors.indices.contains(index) else { return }
         presetColors[index] = color
@@ -406,7 +317,7 @@ final class PaletteState {
         case .pencil:
             return PKInkingTool(.pencil, color: uiColor, width: width)
         case .eraser:
-            return PKEraserTool(eraserMode.eraserType)
+            return PKEraserTool(.vector)
         case .lasso:
             return PKLassoTool()
         }
@@ -518,8 +429,6 @@ final class PaletteState {
     private struct Snapshot: Codable {
         var tool: String
         var penKind: String?
-        var eraserMode: String?
-        var lassoMode: String?
         var color: ColorComponents
         var widths: [String: CGFloat]
         var penWidths: [String: CGFloat]?
@@ -534,8 +443,6 @@ final class PaletteState {
         let snap = Snapshot(
             tool: tool.rawValue,
             penKind: penKind.rawValue,
-            eraserMode: eraserMode.rawValue,
-            lassoMode: lassoMode.rawValue,
             color: ColorComponents.from(color),
             widths: Dictionary(uniqueKeysWithValues: widths.map { ($0.key.rawValue, $0.value) }),
             penWidths: Dictionary(uniqueKeysWithValues: penWidths.map { ($0.key.rawValue, $0.value) }),
@@ -588,14 +495,6 @@ final class PaletteState {
         if let savedPenKind = snap.penKind,
            let kind = PenKind(rawValue: savedPenKind) {
             penKind = kind
-        }
-        if let savedEraserMode = snap.eraserMode,
-           let mode = EraserMode(rawValue: savedEraserMode) {
-            eraserMode = mode
-        }
-        if let savedLassoMode = snap.lassoMode,
-           let mode = LassoMode(rawValue: savedLassoMode) {
-            lassoMode = mode
         }
         if let kind = ToolKind(rawValue: snap.tool) {
             tool = kind

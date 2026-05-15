@@ -9,7 +9,6 @@ final class ScrapOverlayView: UIView,
     var onTap: ((UUID) -> Void)?
     var onPositionChanged: ((UUID, CGPoint) -> Void)?
     var onSizeChanged: ((UUID, CGSize) -> Void)?
-    var onEditRequested: ((UUID) -> Void)?
     var onDeleteRequested: ((UUID) -> Void)?
 
     private(set) var basePosition: CGPoint
@@ -115,15 +114,6 @@ final class ScrapOverlayView: UIView,
         tap.delegate = self
         addGestureRecognizer(tap)
 
-        if kind == .text {
-            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleEdit))
-            doubleTap.allowedTouchTypes = ScrapOverlayView.fingerOnly
-            doubleTap.numberOfTapsRequired = 2
-            doubleTap.delegate = self
-            addGestureRecognizer(doubleTap)
-            tap.require(toFail: doubleTap)
-        }
-
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.allowedTouchTypes = ScrapOverlayView.fingerOnly
         pan.maximumNumberOfTouches = 1
@@ -146,10 +136,6 @@ final class ScrapOverlayView: UIView,
 
     @objc private func handleTap() {
         onTap?(scrapID)
-    }
-
-    @objc private func handleEdit() {
-        onEditRequested?(scrapID)
     }
 
     @objc private func handlePan(_ g: UIPanGestureRecognizer) {
@@ -210,20 +196,12 @@ final class ScrapOverlayView: UIView,
                                 configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
         UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             guard let self else { return nil }
-            var actions: [UIMenuElement] = []
-            if self.kind == .text {
-                actions.append(UIAction(title: "편집",
-                                        image: UIImage(systemName: "square.and.pencil")) { _ in
-                    self.onEditRequested?(self.scrapID)
-                })
-            }
             let delete = UIAction(title: "삭제",
                                   image: UIImage(systemName: "trash"),
                                   attributes: .destructive) { _ in
                 self.onDeleteRequested?(self.scrapID)
             }
-            actions.append(delete)
-            return UIMenu(title: "", children: actions)
+            return UIMenu(title: "", children: [delete])
         }
     }
 }

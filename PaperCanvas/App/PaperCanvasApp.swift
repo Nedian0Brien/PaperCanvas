@@ -7,6 +7,6 @@ struct PaperCanvasApp: App {
         WindowGroup {
             AppShellView()
         }
-        .modelContainer(for: [PaperDocument.self, PaperFolder.self, ScrapItem.self, PageInk.self])
+        .modelContainer(for: [PaperDocument.self, ScrapItem.self, PageInk.self])
     }
 }

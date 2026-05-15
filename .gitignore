@@ -60,11 +60,5 @@ Icon
 .vscode/
 .idea/
 
-# Local prototypes / scratch artifacts
-mockups/
-
-# iCloud duplicate source files
-**/* 2.swift
-
 # Claude
 .claude/

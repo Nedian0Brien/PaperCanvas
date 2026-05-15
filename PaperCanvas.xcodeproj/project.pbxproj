@@ -50,8 +50,6 @@
 		A129B229C329D429E529F629 /* ActiveCanvasBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A119B219C319D419E519F619 /* ActiveCanvasBadge.swift */; };
 		A142B242C342D442E542F642 /* ContextRightZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = A132B232C332D432E532F632 /* ContextRightZone.swift */; };
 		A151B251C351D451E551F651 /* PageJumpSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A150B250C350D450E550F650 /* PageJumpSheet.swift */; };
-		A161B261C361D461E561F661 /* SplitTopBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A160B260C360D460E560F660 /* SplitTopBar.swift */; };
-		A171B271C371D471E571F671 /* PaperFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A170B270C370D470E570F670 /* PaperFolder.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -100,8 +98,6 @@
 		A119B219C319D419E519F619 /* ActiveCanvasBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveCanvasBadge.swift; sourceTree = "<group>"; };
 		A132B232C332D432E532F632 /* ContextRightZone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextRightZone.swift; sourceTree = "<group>"; };
 		A150B250C350D450E550F650 /* PageJumpSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageJumpSheet.swift; sourceTree = "<group>"; };
-		A160B260C360D460E560F660 /* SplitTopBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitTopBar.swift; sourceTree = "<group>"; };
-		A170B270C370D470E570F670 /* PaperFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperFolder.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -109,7 +105,6 @@
 			isa = PBXGroup;
 			children = (
 				D5E6F7081A2B3C4D5E6F7081 /* PageInk.swift */,
-				A170B270C370D470E570F670 /* PaperFolder.swift */,
 				6CD90B3C55111F0006A987CD /* PaperDocument.swift */,
 				5B02E628DF9351673813C0F4 /* ScrapItem.swift */,
 				2B3C4D5E6F7081A2B3C4D5E6 /* InkStroke.swift */,
@@ -159,7 +154,6 @@
 				A130B230C330D430E530F630 /* UnifiedTopBar.swift */,
 				A131B231C331D431E531F631 /* TopBarMetrics.swift */,
 				A132B232C332D432E532F632 /* ContextRightZone.swift */,
-				A160B260C360D460E560F660 /* SplitTopBar.swift */,
 			);
 			path = Toolbar;
 			sourceTree = "<group>";
@@ -422,8 +416,6 @@
 				A129B229C329D429E529F629 /* ActiveCanvasBadge.swift in Sources */,
 				A142B242C342D442E542F642 /* ContextRightZone.swift in Sources */,
 				A151B251C351D451E551F651 /* PageJumpSheet.swift in Sources */,
-				A161B261C361D461E561F661 /* SplitTopBar.swift in Sources */,
-				A171B271C371D471E571F671 /* PaperFolder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

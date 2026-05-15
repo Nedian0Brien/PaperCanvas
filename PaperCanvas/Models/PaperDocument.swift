@@ -1,30 +1,10 @@
 import Foundation
 import SwiftData
 
-enum PaperDocumentKind: String, Codable, CaseIterable {
-    case note
-    case canvas
-
-    var label: String {
-        switch self {
-        case .note: return "노트"
-        case .canvas: return "캔버스"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .note: return "doc.text"
-        case .canvas: return "note.text"
-        }
-    }
-}
-
 @Model
 final class PaperDocument {
     @Attribute(.unique) var id: UUID
     var title: String
-    var documentKindRawValue: String = ""
     var bookmarkData: Data?
     var sourceURLString: String?
     var lastPageIndex: Int
@@ -37,9 +17,6 @@ final class PaperDocument {
     var canvasBackgroundRaw: String = "dots"
     var createdAt: Date
     var updatedAt: Date
-    var isPinned: Bool = false
-    var pinnedAt: Date?
-    var deletedAt: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \ScrapItem.document)
     var scrapItems: [ScrapItem] = []
@@ -47,15 +24,11 @@ final class PaperDocument {
     @Relationship(deleteRule: .cascade, inverse: \PageInk.document)
     var pageInks: [PageInk] = []
 
-    var folder: PaperFolder?
-
     init(title: String,
-         kind: PaperDocumentKind = .note,
          bookmarkData: Data? = nil,
          sourceURLString: String? = nil) {
         self.id = UUID()
         self.title = title
-        self.documentKindRawValue = kind.rawValue
         self.bookmarkData = bookmarkData
         self.sourceURLString = sourceURLString
         self.lastPageIndex = 0
@@ -68,31 +41,5 @@ final class PaperDocument {
         self.canvasBackgroundRaw = "dots"
         self.createdAt = .now
         self.updatedAt = .now
-        self.isPinned = false
-        self.pinnedAt = nil
-        self.deletedAt = nil
-    }
-}
-
-extension PaperDocument {
-    var documentKind: PaperDocumentKind {
-        get {
-            PaperDocumentKind(rawValue: documentKindRawValue) ?? inferredLegacyDocumentKind
-        }
-        set {
-            documentKindRawValue = newValue.rawValue
-        }
-    }
-
-    var hasExplicitDocumentKind: Bool {
-        PaperDocumentKind(rawValue: documentKindRawValue) != nil
-    }
-
-    var inferredLegacyDocumentKind: PaperDocumentKind {
-        bookmarkData == nil && sourceURLString == nil ? .canvas : .note
-    }
-
-    var isDeleted: Bool {
-        deletedAt != nil
     }
 }
