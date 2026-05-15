@@ -1,5 +1,17 @@
 import SwiftUI
 
+private enum DocumentSwitcherGlassID: Hashable, Sendable {
+    case note
+    case canvas
+
+    init(kind: PaperDocumentKind) {
+        switch kind {
+        case .note:   self = .note
+        case .canvas: self = .canvas
+        }
+    }
+}
+
 struct SplitTopBar: View {
     let noteTitle: String
     let canvasTitle: String
@@ -31,6 +43,8 @@ struct SplitTopBar: View {
 
     private var hasPDF: Bool { totalPages > 0 }
 
+    @Namespace private var documentSwitcherNamespace
+
     var body: some View {
         GlassEffectContainer(spacing: 8) {
             HStack(spacing: 8) {
@@ -40,29 +54,33 @@ struct SplitTopBar: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: TopBarMetrics.barHeight)
+        .animation(Motion.indirectFast, value: documentSwitcherKind)
     }
 
-    private func switcherBinding(for kind: PaperDocumentKind) -> Binding<Bool> {
-        Binding(
-            get: { documentSwitcherKind == kind },
-            set: { isShown in
-                let isCurrentlyOpen = documentSwitcherKind == kind
-                if isShown != isCurrentlyOpen {
-                    onToggleDocumentSwitcher(kind)
-                }
-            }
-        )
+    /// Identity used to morph the title capsule into the expanded switcher panel
+    /// in the same `GlassEffectContainer`. The capsule emits `kind` while collapsed
+    /// and `nil` while expanded; the panel emits `kind`. The Liquid Glass system
+    /// matches the two and animates a single element between the two shapes.
+    private func capsuleGlassID(for kind: PaperDocumentKind) -> DocumentSwitcherGlassID? {
+        documentSwitcherKind == kind ? nil : DocumentSwitcherGlassID(kind: kind)
     }
 
     @ViewBuilder
-    private func switcherPopover(for kind: PaperDocumentKind) -> some View {
+    private func morphedPanel(for kind: PaperDocumentKind) -> some View {
         DocumentSwitcherPanel(
             selectedKind: kind,
             documents: documents,
             activePaperID: activePaperID,
             onSelectDocument: onSelectDocument
         )
-        .presentationCompactAdaptation(.popover)
+        .glassEffect(.regular.interactive(),
+                     in: .rect(cornerRadius: Radius.xl))
+        .glassEffectID(DocumentSwitcherGlassID(kind: kind),
+                       in: documentSwitcherNamespace)
+        .transition(.asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.98)),
+            removal: .opacity.combined(with: .scale(scale: 0.98))
+        ))
     }
 
     // MARK: - Leading: library + note identity
@@ -112,13 +130,6 @@ struct SplitTopBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("노트 선택기")
-            .popover(
-                isPresented: switcherBinding(for: .note),
-                attachmentAnchor: .rect(.bounds),
-                arrowEdge: .top
-            ) {
-                switcherPopover(for: .note)
-            }
 
             if hasPDF {
                 divider
@@ -160,7 +171,15 @@ struct SplitTopBar: View {
         .padding(.leading, 4)
         .padding(.trailing, 2)
         .frame(minHeight: TopBarMetrics.buttonSize)
+        .opacity(documentSwitcherKind == .note ? 0 : 1)
         .glassEffect(.regular.interactive(), in: .capsule)
+        .glassEffectID(capsuleGlassID(for: .note), in: documentSwitcherNamespace)
+        .overlay(alignment: .topLeading) {
+            if documentSwitcherKind == .note {
+                morphedPanel(for: .note)
+                    .fixedSize()
+            }
+        }
         .layoutPriority(2)
     }
 
@@ -193,13 +212,6 @@ struct SplitTopBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("캔버스 선택기")
-            .popover(
-                isPresented: switcherBinding(for: .canvas),
-                attachmentAnchor: .rect(.bounds),
-                arrowEdge: .top
-            ) {
-                switcherPopover(for: .canvas)
-            }
 
             divider
 
@@ -249,7 +261,15 @@ struct SplitTopBar: View {
         .padding(.leading, 4)
         .padding(.trailing, 2)
         .frame(minHeight: TopBarMetrics.buttonSize)
+        .opacity(documentSwitcherKind == .canvas ? 0 : 1)
         .glassEffect(.regular.interactive(), in: .capsule)
+        .glassEffectID(capsuleGlassID(for: .canvas), in: documentSwitcherNamespace)
+        .overlay(alignment: .topTrailing) {
+            if documentSwitcherKind == .canvas {
+                morphedPanel(for: .canvas)
+                    .fixedSize()
+            }
+        }
         .layoutPriority(2)
     }
 
