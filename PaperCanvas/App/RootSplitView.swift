@@ -3,12 +3,19 @@ import SwiftData
 import PDFKit
 import PencilKit
 
+private enum InputSurface {
+    case note
+    case canvas
+}
+
 struct RootSplitView: View {
     @Bindable var paper: PaperDocument
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \PaperDocument.updatedAt, order: .reverse) private var libraryPapers: [PaperDocument]
 
+    @State private var activePaperID: UUID?
     @State private var pdfDocument: PDFDocument?
     @State private var canvasDrawing = PKDrawing()
     @State private var pdfInkStrokes: [Int: [InkStroke]] = [:]
@@ -19,18 +26,46 @@ struct RootSplitView: View {
     @State private var leftFraction: CGFloat = 0.5
     @State private var loadError: String?
     @State private var didLoad = false
-    @State private var palette = PaletteState()
+    @State private var palettePDF = PaletteState()
+    @State private var paletteCanvas = PaletteState()
+    @State private var activeInputSurface: InputSurface = .canvas
 
     @State private var accessingURL: URL?
     @State private var saveTask: Task<Void, Never>?
     @State private var saveStatus: SaveStatus = .idle
     @State private var canvasZoomScale: CGFloat = 1.0
     @State private var showingPageJumpSheet = false
+    @State private var textNoteDraft: CanvasTextNoteDraft?
     @State private var savedStatusResetTask: Task<Void, Never>?
+    @State private var documentSwitcherKind: PaperDocumentKind?
+    @Namespace private var documentSwitcherNamespace
     @AppStorage("PaperCanvas.autoHideTopBar") private var autoHideTopBar = false
 
+    private var activePaper: PaperDocument {
+        guard let activePaperID,
+              let paper = libraryPapers.first(where: { $0.id == activePaperID }) else {
+            return paper
+        }
+        return paper
+    }
+
+    private var switchablePapers: [PaperDocument] {
+        libraryPapers
+            .filter { !$0.isDeleted && $0.folder?.isDeleted != true }
+            .sorted { lhs, rhs in
+                if lhs.documentKind != rhs.documentKind {
+                    return lhs.documentKind == .note
+                }
+                return lhs.updatedAt > rhs.updatedAt
+            }
+    }
+
+    private var anyStrokeInProgress: Bool {
+        palettePDF.isStrokeInProgress || paletteCanvas.isStrokeInProgress
+    }
+
     private var chromeOpacity: Double {
-        guard palette.isStrokeInProgress else { return 1.0 }
+        guard anyStrokeInProgress else { return 1.0 }
         return autoHideTopBar ? 0.0 : Motion.dimDuringStrokeOpacity
     }
 
@@ -40,7 +75,11 @@ struct RootSplitView: View {
     private let maxFraction: CGFloat = 0.8
 
     private var canvasBackground: CanvasBackground {
-        CanvasBackground(rawValue: paper.canvasBackgroundRaw) ?? .dots
+        CanvasBackground(rawValue: activePaper.canvasBackgroundRaw) ?? .dots
+    }
+
+    private var hasPDFSource: Bool {
+        activePaper.bookmarkData != nil || !(activePaper.sourceURLString?.isEmpty ?? true)
     }
 
     var body: some View {
@@ -50,69 +89,88 @@ struct RootSplitView: View {
                                 min(totalWidth * maxFraction,
                                     totalWidth * leftFraction))
             let rightWidth = max(0, totalWidth - leftWidth - dividerVisualWidth)
+            let canvasWidth = hasPDFSource ? max(0, rightWidth - (dividerHitWidth - dividerVisualWidth)) : totalWidth
 
             HStack(spacing: 0) {
-                leftPane
+                if hasPDFSource {
+                    ZStack(alignment: .leading) {
+                        leftPane
+                        sideDock(palette: palettePDF, edge: .leading)
+                    }
                     .frame(width: leftWidth)
 
-                DividerHandle(visualWidth: dividerVisualWidth,
-                              hitWidth: dividerHitWidth)
-                    .frame(width: dividerHitWidth)
-                    .gesture(dividerDrag(totalWidth: totalWidth))
+                    DividerHandle(visualWidth: dividerVisualWidth,
+                                  hitWidth: dividerHitWidth)
+                        .frame(width: dividerHitWidth)
+                        .gesture(dividerDrag(totalWidth: totalWidth))
+                }
 
-                ZStack(alignment: .topTrailing) {
+                ZStack(alignment: .trailing) {
                     CanvasView(drawing: $canvasDrawing,
                                contentOffset: $contentOffset,
                                resetTrigger: $canvasResetTrigger,
                                initialContentSize: CGSize(
-                                   width: paper.canvasContentWidth,
-                                   height: paper.canvasContentHeight),
+                                   width: activePaper.canvasContentWidth,
+                                   height: activePaper.canvasContentHeight),
                                scraps: sortedScraps,
-                               palette: palette,
+                               palette: paletteCanvas,
                                background: canvasBackground,
                                onScrapTap: handleScrapTap,
                                onDrop: handleCanvasDrop,
                                onScrapMoved: handleScrapMoved,
                                onScrapResized: handleScrapResized,
+                               onScrapEditRequested: beginEditingTextNote,
                                onScrapDeleted: handleScrapDeleted,
                                onZoomChanged: { scale in
                                    canvasZoomScale = scale
                                },
+                               onCanvasActivated: {
+                                   activeInputSurface = .canvas
+                               },
+                               onPencilTap: handlePencilTap,
                                onStrokeBegan: {
-                                   palette.isStrokeInProgress = true
+                                   activeInputSurface = .canvas
+                                   paletteCanvas.isStrokeInProgress = true
                                },
                                onStrokeEnded: {
-                                   palette.isStrokeInProgress = false
+                                   paletteCanvas.isStrokeInProgress = false
                                })
 
-                    canvasFloatingControls
-                        .padding(Spacing.m)
-                        .opacity(chromeOpacity)
-                        .animation(Motion.chromeFade, value: chromeOpacity)
-                        .allowsHitTesting(chromeOpacity > 0.05)
+                    sideDock(palette: paletteCanvas, edge: .trailing)
                 }
-                .frame(width: rightWidth - (dividerHitWidth - dividerVisualWidth))
+                .frame(width: canvasWidth)
             }
         }
         .ignoresSafeArea(.keyboard)
         .safeAreaInset(edge: .top, spacing: 0) {
-            UnifiedTopBar(
-                title: paper.title,
-                palette: palette,
+            SplitTopBar(
+                noteTitle: noteDisplayTitle,
+                canvasTitle: canvasDisplayTitle,
+                activePaperID: activePaper.id,
+                documents: switchablePapers,
+                documentSwitcherKind: documentSwitcherKind,
+                documentSwitcherNamespace: documentSwitcherNamespace,
+                pageIndex: currentPageIndex,
+                totalPages: pdfDocument?.pageCount ?? 0,
+                canvasZoom: canvasZoomScale,
                 onLibraryTap: {
                     handleDisappear()
                     dismiss()
                 },
-                pageIndex: currentPageIndex,
-                totalPages: pdfDocument?.pageCount ?? 0,
-                saveStatus: saveStatus,
-                canvasZoom: canvasZoomScale,
                 onPageJumpTap: { showingPageJumpSheet = true },
-                onPreviousPage: handlePreviousPage,
-                onNextPage: handleNextPage,
                 onZoomReset: { canvasResetTrigger = UUID() },
-                debugActions: debugActions,
-                autoHideTopBar: $autoHideTopBar
+                onRecenterCanvas: { canvasResetTrigger = UUID() },
+                onAddTextNote: beginAddingTextNote,
+                onToggleDocumentSwitcher: toggleDocumentSwitcher,
+                onSelectDocumentSwitcherKind: selectDocumentSwitcherKind,
+                onSelectDocument: switchToPaper,
+                canvasBackground: canvasBackground,
+                onPickCanvasBackground: { type in
+                    activePaper.canvasBackgroundRaw = type.rawValue
+                    activePaper.updatedAt = .now
+                    scheduleSave()
+                },
+                debugActions: debugActions
             )
             .padding(.horizontal, TopBarMetrics.outerHorizontalPadding)
             .padding(.top, TopBarMetrics.outerTopPadding)
@@ -132,7 +190,14 @@ struct RootSplitView: View {
                 )
             }
         }
-        .task { await loadIfNeeded() }
+        .sheet(item: $textNoteDraft) { draft in
+            CanvasTextNoteSheet(
+                draft: draft,
+                onCancel: { textNoteDraft = nil },
+                onSave: saveTextNote
+            )
+        }
+        .task(id: activePaper.id) { await loadIfNeeded() }
         .onChange(of: canvasDrawing) { _, _ in scheduleSave() }
         .onChange(of: pdfInkStrokes) { _, _ in scheduleSave() }
         .onChange(of: contentOffset) { _, _ in scheduleSave() }
@@ -140,14 +205,30 @@ struct RootSplitView: View {
         .onDisappear { handleDisappear() }
     }
 
-    private func handlePreviousPage() {
-        guard currentPageIndex > 0 else { return }
-        navigationTarget = PDFNavigationTarget(pageIndex: currentPageIndex - 1, pageRect: .zero)
+    private var noteDisplayTitle: String {
+        activePaper.documentKind == .note ? activePaper.title : "노트 선택"
     }
 
-    private func handleNextPage() {
-        guard let pdfDocument, currentPageIndex < pdfDocument.pageCount - 1 else { return }
-        navigationTarget = PDFNavigationTarget(pageIndex: currentPageIndex + 1, pageRect: .zero)
+    private var canvasDisplayTitle: String {
+        activePaper.documentKind == .canvas ? activePaper.title : "캔버스"
+    }
+
+    @ViewBuilder
+    private func sideDock(palette: PaletteState, edge: Edge) -> some View {
+        PaletteToolbar(
+            palette: palette,
+            layout: .vertical,
+            popoverArrowEdge: edge == .leading ? .leading : .trailing
+        )
+        .glassEffect(.regular, in: .rect(cornerRadius: Radius.xl))
+        .padding(sideDockPadding(for: edge), Spacing.s)
+            .opacity(chromeOpacity)
+            .animation(Motion.chromeFade, value: chromeOpacity)
+            .allowsHitTesting(chromeOpacity > 0.05)
+    }
+
+    private func sideDockPadding(for edge: Edge) -> Edge.Set {
+        edge == .leading ? .leading : .trailing
     }
 
     @ViewBuilder
@@ -157,8 +238,12 @@ struct RootSplitView: View {
                        currentPageIndex: $currentPageIndex,
                        navigationTarget: $navigationTarget,
                        pageInkStrokes: $pdfInkStrokes,
-                       palette: palette,
-                       onRegionCaptured: handleRegionCaptured)
+                       palette: palettePDF,
+                       onRegionCaptured: handleRegionCaptured,
+                       onPDFInkActivated: {
+                           activeInputSurface = .note
+                       },
+                       onPencilTap: handlePencilTap)
         } else if let loadError {
             VStack(spacing: Spacing.m) {
                 Image(systemName: "exclamationmark.triangle")
@@ -176,49 +261,9 @@ struct RootSplitView: View {
         }
     }
 
-    @ViewBuilder
-    private var canvasFloatingControls: some View {
-        GlassEffectContainer(spacing: Spacing.s) {
-            VStack(spacing: Spacing.s) {
-                Button {
-                    canvasResetTrigger = UUID()
-                } label: {
-                    Image(systemName: "scope")
-                        .font(.title3)
-                        .frame(width: 40, height: 40)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("캔버스 가운데로")
-
-                Menu {
-                    ForEach(CanvasBackground.allCases) { type in
-                        Button {
-                            paper.canvasBackgroundRaw = type.rawValue
-                            paper.updatedAt = .now
-                        } label: {
-                            Label(type.label, systemImage: type.systemImage)
-                            if canvasBackground == type {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: canvasBackground.systemImage)
-                        .font(.title3)
-                        .frame(width: 40, height: 40)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("캔버스 배경")
-            }
-        }
-        .foregroundStyle(Color.Ink.primary)
-    }
-
-    private var debugActions: UnifiedTopBar.DebugActions? {
+    private var debugActions: SplitTopBar.DebugActions? {
         #if DEBUG
-        UnifiedTopBar.DebugActions(
+        SplitTopBar.DebugActions(
             addTextScrap: addDummyTextScrap,
             addImageScrap: addDummyImageScrap
         )
@@ -228,15 +273,28 @@ struct RootSplitView: View {
     }
 
     private var sortedScraps: [ScrapItem] {
-        paper.scrapItems.sorted(by: { $0.createdAt < $1.createdAt })
+        activePaper.scrapItems.sorted(by: { $0.createdAt < $1.createdAt })
+    }
+
+    private func handlePencilTap() {
+        switch activeInputSurface {
+        case .note:
+            palettePDF.switchToPreviousTool()
+        case .canvas:
+            paletteCanvas.switchToPreviousTool()
+        }
     }
 
     private func handleScrapTap(_ id: UUID) {
-        guard let scrap = paper.scrapItems.first(where: { $0.id == id }) else { return }
+        guard let scrap = activePaper.scrapItems.first(where: { $0.id == id }) else { return }
         let rect = CGRect(x: scrap.sourceRectX,
                           y: scrap.sourceRectY,
                           width: scrap.sourceRectW,
                           height: scrap.sourceRectH)
+        if scrap.kind == .text, rect.isEmpty {
+            beginEditingTextNote(id)
+            return
+        }
         navigationTarget = PDFNavigationTarget(pageIndex: scrap.sourcePageIndex,
                                                pageRect: rect)
     }
@@ -253,8 +311,10 @@ struct RootSplitView: View {
             sourcePageIndex: pageIndex,
             sourceRect: pageRect
         )
-        scrap.document = paper
+        scrap.document = activePaper
         modelContext.insert(scrap)
+        activePaper.updatedAt = .now
+        scheduleSave()
     }
 
     private func imageDisplaySize(for image: UIImage) -> CGSize {
@@ -265,22 +325,26 @@ struct RootSplitView: View {
     }
 
     private func handleScrapMoved(_ id: UUID, _ position: CGPoint) {
-        guard let scrap = paper.scrapItems.first(where: { $0.id == id }) else { return }
+        guard let scrap = activePaper.scrapItems.first(where: { $0.id == id }) else { return }
         scrap.positionX = Double(position.x)
         scrap.positionY = Double(position.y)
-        paper.updatedAt = .now
+        activePaper.updatedAt = .now
+        scheduleSave()
     }
 
     private func handleScrapResized(_ id: UUID, _ size: CGSize) {
-        guard let scrap = paper.scrapItems.first(where: { $0.id == id }) else { return }
+        guard let scrap = activePaper.scrapItems.first(where: { $0.id == id }) else { return }
         scrap.width = Double(size.width)
         scrap.height = Double(size.height)
-        paper.updatedAt = .now
+        activePaper.updatedAt = .now
+        scheduleSave()
     }
 
     private func handleScrapDeleted(_ id: UUID) {
-        guard let scrap = paper.scrapItems.first(where: { $0.id == id }) else { return }
+        guard let scrap = activePaper.scrapItems.first(where: { $0.id == id }) else { return }
         modelContext.delete(scrap)
+        activePaper.updatedAt = .now
+        scheduleSave()
     }
 
     private func handleCanvasDrop(_ payload: CanvasDropPayload) {
@@ -294,23 +358,16 @@ struct RootSplitView: View {
             sourcePageIndex: payload.sourcePageIndex,
             sourceRect: payload.sourceRect
         )
-        scrap.document = paper
+        scrap.document = activePaper
         modelContext.insert(scrap)
+        activePaper.updatedAt = .now
+        scheduleSave()
     }
 
     private func estimateScrapSize(for payload: CanvasDropPayload) -> CGSize {
         switch payload.kind {
         case .text:
-            let text = payload.text ?? ""
-            let maxWidth: CGFloat = 320
-            let font = UIFont.preferredFont(forTextStyle: .body)
-            let bounding = (text as NSString).boundingRect(
-                with: CGSize(width: maxWidth - 20, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: [.font: font],
-                context: nil
-            )
-            return CGSize(width: maxWidth, height: max(60, bounding.height + 24))
+            return estimateTextNoteSize(for: payload.text ?? "")
         case .image:
             if let data = payload.imageData, let img = UIImage(data: data) {
                 let maxDim: CGFloat = 280
@@ -325,18 +382,73 @@ struct RootSplitView: View {
         }
     }
 
+    private func beginAddingTextNote() {
+        textNoteDraft = CanvasTextNoteDraft(scrapID: nil, text: "")
+    }
+
+    private func beginEditingTextNote(_ id: UUID) {
+        guard let scrap = activePaper.scrapItems.first(where: { $0.id == id }),
+              scrap.kind == .text else { return }
+        textNoteDraft = CanvasTextNoteDraft(scrapID: id, text: scrap.text ?? "")
+    }
+
+    private func saveTextNote(_ draft: CanvasTextNoteDraft, _ rawText: String) {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            textNoteDraft = nil
+            return
+        }
+
+        if let scrapID = draft.scrapID,
+           let scrap = activePaper.scrapItems.first(where: { $0.id == scrapID }) {
+            scrap.text = text
+            let estimated = estimateTextNoteSize(
+                for: text,
+                maxWidth: max(220, CGFloat(scrap.width))
+            )
+            scrap.height = Double(max(CGFloat(scrap.height), estimated.height))
+        } else {
+            let position = CGPoint(x: contentOffset.x + 120, y: contentOffset.y + 120)
+            let scrap = ScrapItem(
+                kind: .text,
+                text: text,
+                position: position,
+                size: estimateTextNoteSize(for: text),
+                sourcePageIndex: currentPageIndex,
+                sourceRect: .zero
+            )
+            scrap.document = activePaper
+            modelContext.insert(scrap)
+        }
+
+        activePaper.updatedAt = .now
+        textNoteDraft = nil
+        scheduleSave()
+    }
+
+    private func estimateTextNoteSize(for text: String, maxWidth: CGFloat = 320) -> CGSize {
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        let bounding = (text as NSString).boundingRect(
+            with: CGSize(width: maxWidth - 20, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        )
+        return CGSize(width: maxWidth, height: max(72, bounding.height + 28))
+    }
+
     #if DEBUG
     private func addDummyTextScrap() {
         let position = nextDummyPosition()
         let scrap = ScrapItem(
             kind: .text,
-            text: "샘플 텍스트 스크랩 #\(paper.scrapItems.count + 1)\nPhase 2 Step 2 검증용",
+            text: "샘플 텍스트 스크랩 #\(activePaper.scrapItems.count + 1)\nPhase 2 Step 2 검증용",
             position: position,
             size: CGSize(width: 280, height: 120),
             sourcePageIndex: currentPageIndex,
             sourceRect: .zero
         )
-        scrap.document = paper
+        scrap.document = activePaper
         modelContext.insert(scrap)
     }
 
@@ -347,7 +459,7 @@ struct RootSplitView: View {
         let image = renderer.image { ctx in
             UIColor.systemTeal.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
-            let label = "IMG #\(paper.scrapItems.count + 1)"
+            let label = "IMG #\(activePaper.scrapItems.count + 1)"
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 28, weight: .semibold),
                 .foregroundColor: UIColor.white
@@ -365,14 +477,14 @@ struct RootSplitView: View {
             sourcePageIndex: currentPageIndex,
             sourceRect: .zero
         )
-        scrap.document = paper
+        scrap.document = activePaper
         modelContext.insert(scrap)
     }
 
     private func nextDummyPosition() -> CGPoint {
         let baseX = contentOffset.x + 80
         let baseY = contentOffset.y + 80
-        let jitter = CGFloat(paper.scrapItems.count % 5) * 24
+        let jitter = CGFloat(activePaper.scrapItems.count % 5) * 24
         return CGPoint(x: baseX + jitter, y: baseY + jitter)
     }
     #endif
@@ -386,17 +498,78 @@ struct RootSplitView: View {
             }
     }
 
+    private func toggleDocumentSwitcher(_ kind: PaperDocumentKind) {
+        withAnimation(Motion.indirectFast) {
+            documentSwitcherKind = documentSwitcherKind == kind ? nil : kind
+        }
+    }
+
+    private func selectDocumentSwitcherKind(_ kind: PaperDocumentKind) {
+        withAnimation(Motion.indirectFast) {
+            documentSwitcherKind = kind
+        }
+    }
+
+    private func switchToPaper(_ target: PaperDocument) {
+        guard target.id != activePaper.id else {
+            withAnimation(Motion.indirectFast) {
+                documentSwitcherKind = nil
+            }
+            return
+        }
+
+        saveTask?.cancel()
+        savedStatusResetTask?.cancel()
+        if didLoad { persist() }
+        accessingURL?.stopAccessingSecurityScopedResource()
+        accessingURL = nil
+
+        resetActivePaperSession()
+        withAnimation(Motion.indirectFast) {
+            activePaperID = target.id
+            documentSwitcherKind = nil
+        }
+    }
+
+    private func resetActivePaperSession() {
+        pdfDocument = nil
+        canvasDrawing = PKDrawing()
+        pdfInkStrokes = [:]
+        contentOffset = .zero
+        currentPageIndex = 0
+        navigationTarget = nil
+        canvasResetTrigger = UUID()
+        leftFraction = 0.5
+        loadError = nil
+        didLoad = false
+        saveTask = nil
+        savedStatusResetTask = nil
+        saveStatus = .idle
+        canvasZoomScale = 1.0
+        showingPageJumpSheet = false
+        textNoteDraft = nil
+        palettePDF.isStrokeInProgress = false
+        paletteCanvas.isStrokeInProgress = false
+        activeInputSurface = .canvas
+    }
+
     private func loadIfNeeded() async {
         guard !didLoad else { return }
         didLoad = true
 
-        currentPageIndex = paper.lastPageIndex
-        contentOffset = CGPoint(x: paper.canvasOffsetX, y: paper.canvasOffsetY)
-        if let data = paper.drawingData,
+        currentPageIndex = activePaper.lastPageIndex
+        contentOffset = CGPoint(x: activePaper.canvasOffsetX, y: activePaper.canvasOffsetY)
+        if let data = activePaper.drawingData,
            let drawing = try? PKDrawing(data: data) {
             canvasDrawing = drawing
         }
         pdfInkStrokes = resolvePageInkStrokes()
+
+        guard hasPDFSource else {
+            pdfDocument = nil
+            loadError = nil
+            return
+        }
 
         guard let url = resolvePDFURL() else {
             loadError = "PDF를 찾을 수 없습니다"
@@ -414,17 +587,17 @@ struct RootSplitView: View {
     }
 
     private func resolvePDFURL() -> URL? {
-        if let bookmark = paper.bookmarkData {
+        if let bookmark = activePaper.bookmarkData {
             var stale = false
             if let url = try? URL(resolvingBookmarkData: bookmark,
                                   bookmarkDataIsStale: &stale) {
                 if stale, let refreshed = try? url.bookmarkData() {
-                    paper.bookmarkData = refreshed
+                    activePaper.bookmarkData = refreshed
                 }
                 return url
             }
         }
-        if let s = paper.sourceURLString {
+        if let s = activePaper.sourceURLString {
             if s.hasPrefix("/") { return URL(fileURLWithPath: s) }
             if let u = URL(string: s), u.isFileURL { return u }
         }
@@ -455,18 +628,18 @@ struct RootSplitView: View {
     }
 
     private func persist() {
-        paper.lastPageIndex = currentPageIndex
-        paper.canvasOffsetX = Double(contentOffset.x)
-        paper.canvasOffsetY = Double(contentOffset.y)
-        paper.drawingData = canvasDrawing.dataRepresentation()
+        activePaper.lastPageIndex = currentPageIndex
+        activePaper.canvasOffsetX = Double(contentOffset.x)
+        activePaper.canvasOffsetY = Double(contentOffset.y)
+        activePaper.drawingData = canvasDrawing.dataRepresentation()
         syncPageInkModels()
-        paper.pdfInkData = nil
-        paper.updatedAt = .now
+        activePaper.pdfInkData = nil
+        activePaper.updatedAt = .now
     }
 
     private func resolvePageInkStrokes() -> [Int: [InkStroke]] {
         var strokesByPage: [Int: [InkStroke]] = [:]
-        for ink in paper.pageInks {
+        for ink in activePaper.pageInks {
             if let strokes = try? JSONDecoder().decode([InkStroke].self, from: ink.drawingData),
                !strokes.isEmpty {
                 strokesByPage[ink.pageIndex] = strokes
@@ -478,7 +651,7 @@ struct RootSplitView: View {
             }
         }
         if strokesByPage.isEmpty,
-           let data = paper.pdfInkData,
+           let data = activePaper.pdfInkData,
            !data.isEmpty,
            let legacyDrawing = try? PKDrawing(data: data) {
             let strokes = PKDrawingConverter.toInkStrokes(legacyDrawing)
@@ -491,7 +664,7 @@ struct RootSplitView: View {
 
     private func syncPageInkModels() {
         var existingByPage: [Int: PageInk] = [:]
-        for ink in paper.pageInks {
+        for ink in activePaper.pageInks {
             if existingByPage[ink.pageIndex] == nil {
                 existingByPage[ink.pageIndex] = ink
             } else {
@@ -500,7 +673,7 @@ struct RootSplitView: View {
         }
 
         let activeStrokes = pdfInkStrokes.filter { !$0.value.isEmpty }
-        for ink in paper.pageInks where activeStrokes[ink.pageIndex] == nil {
+        for ink in activePaper.pageInks where activeStrokes[ink.pageIndex] == nil {
             modelContext.delete(ink)
         }
 
@@ -509,10 +682,10 @@ struct RootSplitView: View {
             if let ink = existingByPage[pageIndex] {
                 ink.drawingData = data
                 ink.updatedAt = .now
-                ink.document = paper
+                ink.document = activePaper
             } else {
                 let ink = PageInk(pageIndex: pageIndex, drawingData: data)
-                ink.document = paper
+                ink.document = activePaper
                 modelContext.insert(ink)
             }
         }
@@ -545,5 +718,71 @@ private struct DividerHandle: View {
         .frame(width: hitWidth)
         .contentShape(.rect)
         .hoverEffect(.lift)
+    }
+}
+
+private struct CanvasTextNoteDraft: Identifiable, Equatable {
+    let id = UUID()
+    let scrapID: UUID?
+    var text: String
+
+    var isNew: Bool {
+        scrapID == nil
+    }
+}
+
+private struct CanvasTextNoteSheet: View {
+    let draft: CanvasTextNoteDraft
+    let onCancel: () -> Void
+    let onSave: (CanvasTextNoteDraft, String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String
+    @FocusState private var isFocused: Bool
+
+    init(draft: CanvasTextNoteDraft,
+         onCancel: @escaping () -> Void,
+         onSave: @escaping (CanvasTextNoteDraft, String) -> Void) {
+        self.draft = draft
+        self.onCancel = onCancel
+        self.onSave = onSave
+        _text = State(initialValue: draft.text)
+    }
+
+    var body: some View {
+        NavigationStack {
+            TextEditor(text: $text)
+                .font(AppType.body)
+                .foregroundStyle(Color.Ink.primary)
+                .scrollContentBackground(.hidden)
+                .background(Color.Surface.paper)
+                .padding(Spacing.m)
+                .navigationTitle(draft.isNew ? "텍스트 메모 추가" : "텍스트 메모 편집")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("취소") {
+                            onCancel()
+                            dismiss()
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("완료") {
+                            onSave(draft, text)
+                            dismiss()
+                        }
+                        .disabled(trimmedText.isEmpty)
+                    }
+                }
+                .focused($isFocused)
+        }
+        .presentationDetents([.medium, .large])
+        .task {
+            isFocused = true
+        }
+    }
+
+    private var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

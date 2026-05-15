@@ -10,6 +10,9 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
     let initialContentSize: CGSize
     let scraps: [ScrapItem]
     let tool: PKTool
+    let toolKind: ToolKind
+    let lassoMode: LassoMode
+    let prefersNativeToolRendering: Bool
     let undoTrigger: UUID?
     let redoTrigger: UUID?
     let isMainCanvasActive: Bool
@@ -18,6 +21,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
     var onDrop: ((CanvasDropPayload) -> Void)? = nil
     var onScrapMoved: ((UUID, CGPoint) -> Void)? = nil
     var onScrapResized: ((UUID, CGSize) -> Void)? = nil
+    var onScrapEditRequested: ((UUID) -> Void)? = nil
     var onScrapDeleted: ((UUID) -> Void)? = nil
     var onUndoRedoStateChanged: ((Bool, Bool) -> Void)? = nil
     var onMainCanvasActivated: (() -> Void)? = nil
@@ -59,6 +63,20 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         let pencil = UIPencilInteraction()
         pencil.delegate = context.coordinator
         canvas.addInteraction(pencil)
+        let activationTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleCanvasTouchActivation(_:))
+        )
+        activationTap.delegate = context.coordinator
+        activationTap.cancelsTouchesInView = false
+        canvas.addGestureRecognizer(activationTap)
+        let activationPan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleCanvasTouchActivation(_:))
+        )
+        activationPan.delegate = context.coordinator
+        activationPan.cancelsTouchesInView = false
+        canvas.addGestureRecognizer(activationPan)
 
         canvas.translatesAutoresizingMaskIntoConstraints = false
         wrapper.addSubview(canvas)
@@ -79,8 +97,33 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             inkMetalView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor)
         ])
 
-        context.coordinator.attach(canvas: canvas, inkMetalView: inkMetalView)
+        let rectangleLassoOverlay = CanvasRectangleLassoOverlayView()
+        rectangleLassoOverlay.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(rectangleLassoOverlay)
+        NSLayoutConstraint.activate([
+            rectangleLassoOverlay.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            rectangleLassoOverlay.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+            rectangleLassoOverlay.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            rectangleLassoOverlay.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor)
+        ])
+
+        let rectangleLassoPan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleRectangleLassoPan(_:))
+        )
+        rectangleLassoPan.delegate = context.coordinator
+        rectangleLassoPan.cancelsTouchesInView = true
+        canvas.addGestureRecognizer(rectangleLassoPan)
+
+        context.coordinator.attach(canvas: canvas,
+                                   inkMetalView: inkMetalView,
+                                   rectangleLassoOverlay: rectangleLassoOverlay,
+                                   rectangleLassoPan: rectangleLassoPan,
+                                   activationTap: activationTap,
+                                   activationPan: activationPan)
         context.coordinator.lastAppliedBackground = background
+        context.coordinator.syncInkOverlayVisibility()
+        context.coordinator.syncRectangleLassoState()
         context.coordinator.syncRendererFromCanvas(canvas)
         context.coordinator.lastSyncedData = drawing.dataRepresentation()
 
@@ -105,6 +148,8 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             context.coordinator.syncRendererFromCanvas(canvas)
         }
         canvas.tool = tool
+        context.coordinator.syncInkOverlayVisibility()
+        context.coordinator.syncRectangleLassoState()
         context.coordinator.syncBackground(in: canvas, type: background)
         context.coordinator.syncScraps(in: canvas, with: scraps)
         context.coordinator.handleResetIfNeeded(canvas)
@@ -112,31 +157,64 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, PKCanvasViewDelegate, UIDropInteractionDelegate, UIPencilInteractionDelegate {
+    final class Coordinator: NSObject, PKCanvasViewDelegate, UIDropInteractionDelegate, UIPencilInteractionDelegate, UIGestureRecognizerDelegate {
         var parent: InfiniteCanvasContainer
         var lastAppliedBackground: CanvasBackground?
         var lastSyncedData: Data?
         var isApplyingExternalDrawing = false
         weak var canvas: PKCanvasView?
         weak var inkMetalView: InkMetalView?
+        weak var rectangleLassoOverlay: CanvasRectangleLassoOverlayView?
+        weak var rectangleLassoPan: UIPanGestureRecognizer?
+        weak var activationTap: UITapGestureRecognizer?
+        weak var activationPan: UIPanGestureRecognizer?
         private var didApplyInitialOffset = false
         private var scrapViews: [UUID: ScrapOverlayView] = [:]
         private var lastResetTrigger: UUID?
         private var lastUndoTrigger: UUID?
         private var lastRedoTrigger: UUID?
         private var isUserDrawing = false
+        private var rectangleLassoStart: CGPoint?
+        private var activeRectangleLassoRect: CGRect?
+        private var selectedRectangleLassoIndices: Set<Int> = []
+        private var movingSelectionOriginalDrawing: PKDrawing?
+        private var movingSelectionLastPoint: CGPoint?
 
         init(_ parent: InfiniteCanvasContainer) { self.parent = parent }
 
-        func attach(canvas: PKCanvasView, inkMetalView: InkMetalView) {
+        func attach(canvas: PKCanvasView,
+                    inkMetalView: InkMetalView,
+                    rectangleLassoOverlay: CanvasRectangleLassoOverlayView,
+                    rectangleLassoPan: UIPanGestureRecognizer,
+                    activationTap: UITapGestureRecognizer,
+                    activationPan: UIPanGestureRecognizer) {
             self.canvas = canvas
             self.inkMetalView = inkMetalView
+            self.rectangleLassoOverlay = rectangleLassoOverlay
+            self.rectangleLassoPan = rectangleLassoPan
+            self.activationTap = activationTap
+            self.activationPan = activationPan
         }
 
         func syncRendererFromCanvas(_ canvas: PKCanvasView) {
             inkMetalView?.inkRenderer.setStrokes(PKDrawingConverter.toInkStrokes(canvas.drawing))
             inkMetalView?.inkRenderer.setInProgress(nil)
             inkMetalView?.setNeedsDisplay()
+        }
+
+        func syncInkOverlayVisibility() {
+            inkMetalView?.isHidden = parent.prefersNativeToolRendering
+        }
+
+        func syncRectangleLassoState() {
+            let isRectangleLasso = parent.toolKind == .lasso && parent.lassoMode == .rectangle
+            rectangleLassoPan?.isEnabled = isRectangleLasso
+            rectangleLassoOverlay?.isHidden = !isRectangleLasso
+            if !isRectangleLasso {
+                clearRectangleLassoSelection()
+            } else {
+                updateRectangleLassoOverlay()
+            }
         }
 
         // MARK: - Camera
@@ -242,6 +320,9 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                     view.onSizeChanged = { [weak self] id, size in
                         self?.parent.onScrapResized?(id, size)
                     }
+                    view.onEditRequested = { [weak self] id in
+                        self?.parent.onScrapEditRequested?(id)
+                    }
                     view.onDeleteRequested = { [weak self] id in
                         self?.parent.onScrapDeleted?(id)
                     }
@@ -256,6 +337,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
 
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
             isUserDrawing = true
+            parent.onMainCanvasActivated?()
             parent.onStrokeBegan?()
         }
 
@@ -285,6 +367,12 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             parent.onMainCanvasActivated?()
         }
 
+        @objc func handleCanvasTouchActivation(_ recognizer: UIGestureRecognizer) {
+            if recognizer.state == .began || recognizer.state == .ended {
+                parent.onMainCanvasActivated?()
+            }
+        }
+
         private func publishDrawing(_ drawing: PKDrawing) {
             lastSyncedData = drawing.dataRepresentation()
             parent.drawing = drawing
@@ -295,6 +383,173 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                 canvasView.undoManager?.canUndo ?? false,
                 canvasView.undoManager?.canRedo ?? false
             )
+        }
+
+        // MARK: - Rectangle lasso
+
+        @objc func handleRectangleLassoPan(_ recognizer: UIPanGestureRecognizer) {
+            guard parent.toolKind == .lasso,
+                  parent.lassoMode == .rectangle,
+                  let canvas else { return }
+            let point = recognizer.location(in: canvas)
+            switch recognizer.state {
+            case .began:
+                parent.onMainCanvasActivated?()
+                parent.onStrokeBegan?()
+                if let selectionBounds = selectedRectangleLassoBounds(in: canvas),
+                   selectionBounds.insetBy(dx: -18, dy: -18).contains(point) {
+                    movingSelectionOriginalDrawing = canvas.drawing
+                    movingSelectionLastPoint = point
+                    activeRectangleLassoRect = nil
+                } else {
+                    selectedRectangleLassoIndices.removeAll()
+                    movingSelectionOriginalDrawing = nil
+                    movingSelectionLastPoint = nil
+                    rectangleLassoStart = point
+                    activeRectangleLassoRect = CGRect(origin: point, size: .zero)
+                }
+                updateRectangleLassoOverlay()
+            case .changed:
+                if movingSelectionOriginalDrawing != nil {
+                    moveSelectedRectangleLassoStrokes(to: point, in: canvas)
+                } else if let start = rectangleLassoStart {
+                    activeRectangleLassoRect = CGRect(
+                        x: min(start.x, point.x),
+                        y: min(start.y, point.y),
+                        width: abs(start.x - point.x),
+                        height: abs(start.y - point.y)
+                    )
+                    updateRectangleLassoOverlay()
+                }
+            case .ended:
+                if movingSelectionOriginalDrawing != nil {
+                    finishMovingRectangleSelection(in: canvas)
+                } else {
+                    finishRectangleSelection(in: canvas)
+                }
+            case .cancelled, .failed:
+                cancelRectangleLasso(in: canvas)
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            if gestureRecognizer === rectangleLassoPan {
+                return parent.toolKind == .lasso && parent.lassoMode == .rectangle
+            }
+            if gestureRecognizer === activationPan {
+                return !(parent.toolKind == .lasso && parent.lassoMode == .rectangle)
+            }
+            return true
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            if gestureRecognizer === rectangleLassoPan || otherGestureRecognizer === rectangleLassoPan {
+                return false
+            }
+            return true
+        }
+
+        private func moveSelectedRectangleLassoStrokes(to point: CGPoint, in canvas: PKCanvasView) {
+            guard let lastPoint = movingSelectionLastPoint,
+                  !selectedRectangleLassoIndices.isEmpty else { return }
+            let delta = CGVector(dx: point.x - lastPoint.x, dy: point.y - lastPoint.y)
+            guard abs(delta.dx) > 0.01 || abs(delta.dy) > 0.01 else { return }
+            var strokes = canvas.drawing.strokes
+            for index in selectedRectangleLassoIndices where strokes.indices.contains(index) {
+                strokes[index] = strokes[index].translatedForCanvas(by: delta)
+            }
+            isApplyingExternalDrawing = true
+            canvas.drawing = PKDrawing(strokes: strokes)
+            isApplyingExternalDrawing = false
+            publishDrawing(canvas.drawing)
+            syncRendererFromCanvas(canvas)
+            movingSelectionLastPoint = point
+            updateRectangleLassoOverlay()
+        }
+
+        private func finishRectangleSelection(in canvas: PKCanvasView) {
+            defer {
+                rectangleLassoStart = nil
+                activeRectangleLassoRect = nil
+                parent.onStrokeEnded?()
+                updateRectangleLassoOverlay()
+            }
+            guard let rect = activeRectangleLassoRect,
+                  rect.width > 4,
+                  rect.height > 4 else {
+                selectedRectangleLassoIndices.removeAll()
+                return
+            }
+            selectedRectangleLassoIndices = selectedStrokeIndices(in: canvas, intersecting: rect)
+        }
+
+        private func finishMovingRectangleSelection(in canvas: PKCanvasView) {
+            movingSelectionOriginalDrawing = nil
+            movingSelectionLastPoint = nil
+            publishDrawing(canvas.drawing)
+            notifyUndoRedoState(canvas)
+            parent.onStrokeEnded?()
+            updateRectangleLassoOverlay()
+        }
+
+        private func cancelRectangleLasso(in canvas: PKCanvasView) {
+            if let original = movingSelectionOriginalDrawing {
+                isApplyingExternalDrawing = true
+                canvas.drawing = original
+                isApplyingExternalDrawing = false
+                publishDrawing(original)
+                syncRendererFromCanvas(canvas)
+            }
+            rectangleLassoStart = nil
+            activeRectangleLassoRect = nil
+            movingSelectionOriginalDrawing = nil
+            movingSelectionLastPoint = nil
+            parent.onStrokeEnded?()
+            updateRectangleLassoOverlay()
+        }
+
+        private func clearRectangleLassoSelection() {
+            rectangleLassoStart = nil
+            activeRectangleLassoRect = nil
+            selectedRectangleLassoIndices.removeAll()
+            movingSelectionOriginalDrawing = nil
+            movingSelectionLastPoint = nil
+            rectangleLassoOverlay?.update(activeContentRect: nil,
+                                          selectedContentRect: nil,
+                                          in: nil)
+        }
+
+        private func updateRectangleLassoOverlay() {
+            guard let canvas else { return }
+            rectangleLassoOverlay?.update(activeContentRect: activeRectangleLassoRect,
+                                          selectedContentRect: selectedRectangleLassoBounds(in: canvas),
+                                          in: canvas)
+        }
+
+        private func selectedStrokeIndices(in canvas: PKCanvasView, intersecting rect: CGRect) -> Set<Int> {
+            Set(canvas.drawing.strokes.enumerated().compactMap { index, pkStroke in
+                guard let inkStroke = PKDrawingConverter.convert(pkStroke),
+                      self.stroke(inkStroke, intersects: rect) else { return nil }
+                return index
+            })
+        }
+
+        private func selectedRectangleLassoBounds(in canvas: PKCanvasView) -> CGRect? {
+            var union: CGRect?
+            for index in selectedRectangleLassoIndices where canvas.drawing.strokes.indices.contains(index) {
+                guard let inkStroke = PKDrawingConverter.convert(canvas.drawing.strokes[index]) else { continue }
+                union = union.map { $0.union(inkStroke.boundingBox) } ?? inkStroke.boundingBox
+            }
+            return union
+        }
+
+        private func stroke(_ stroke: InkStroke, intersects rect: CGRect) -> Bool {
+            let expanded = rect.insetBy(dx: -stroke.baseWidth * 0.5, dy: -stroke.baseWidth * 0.5)
+            guard stroke.boundingBox.intersects(expanded) else { return false }
+            return stroke.points.contains { expanded.contains($0.location) }
         }
 
         func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
@@ -316,16 +571,20 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             guard let canvas = scrollView as? PKCanvasView else { return }
             guard !scrollView.isZooming, !scrollView.isZoomBouncing else { return }
+            parent.onMainCanvasActivated?()
             expandIfNearEdges(canvas)
             updateCameraMatrix()
+            updateRectangleLassoOverlay()
         }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            parent.onMainCanvasActivated?()
             let scale = scrollView.zoomScale
             for view in scrapViews.values {
                 view.applyZoom(scale)
             }
             updateCameraMatrix()
+            updateRectangleLassoOverlay()
             parent.onZoomChanged?(scale)
         }
 
@@ -334,6 +593,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             expandIfNearEdges(canvas)
             commitOffset(canvas)
             updateCameraMatrix()
+            updateRectangleLassoOverlay()
         }
 
         func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
@@ -444,5 +704,73 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                 }
             }
         }
+    }
+}
+
+final class CanvasRectangleLassoOverlayView: UIView {
+    private var activeRect: CGRect?
+    private var selectedRect: CGRect?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not implemented")
+    }
+
+    func update(activeContentRect: CGRect?,
+                selectedContentRect: CGRect?,
+                in canvas: PKCanvasView?) {
+        if let canvas {
+            activeRect = activeContentRect.map { canvas.convert($0, to: self).standardized }
+            selectedRect = selectedContentRect.map { canvas.convert($0.insetBy(dx: -6, dy: -6), to: self).standardized }
+        } else {
+            activeRect = nil
+            selectedRect = nil
+        }
+        setNeedsDisplay()
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        if let selectedRect {
+            draw(rect: selectedRect,
+                 stroke: UIColor.systemBlue.withAlphaComponent(0.9),
+                 fill: UIColor.systemBlue.withAlphaComponent(0.08),
+                 in: context)
+        }
+        if let activeRect {
+            draw(rect: activeRect,
+                 stroke: UIColor.systemBlue,
+                 fill: UIColor.systemBlue.withAlphaComponent(0.04),
+                 in: context)
+        }
+    }
+
+    private func draw(rect: CGRect, stroke: UIColor, fill: UIColor, in context: CGContext) {
+        guard rect.width > 0, rect.height > 0 else { return }
+        context.saveGState()
+        context.setStrokeColor(stroke.cgColor)
+        context.setFillColor(fill.cgColor)
+        context.setLineWidth(1.5)
+        context.setLineDash(phase: 0, lengths: [7, 4])
+        let path = UIBezierPath(roundedRect: rect, cornerRadius: 8).cgPath
+        context.addPath(path)
+        context.drawPath(using: .fillStroke)
+        context.restoreGState()
+    }
+}
+
+private extension PKStroke {
+    func translatedForCanvas(by delta: CGVector) -> PKStroke {
+        var copy = self
+        copy.transform = copy.transform.translatedBy(x: delta.dx, y: delta.dy)
+        return copy
     }
 }
