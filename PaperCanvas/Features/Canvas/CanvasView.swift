@@ -13,8 +13,11 @@ struct CanvasView: View {
     var onDrop: ((CanvasDropPayload) -> Void)? = nil
     var onScrapMoved: ((UUID, CGPoint) -> Void)? = nil
     var onScrapResized: ((UUID, CGSize) -> Void)? = nil
+    var onScrapEditRequested: ((UUID) -> Void)? = nil
     var onScrapDeleted: ((UUID) -> Void)? = nil
     var onZoomChanged: ((CGFloat) -> Void)? = nil
+    var onCanvasActivated: (() -> Void)? = nil
+    var onPencilTap: (() -> Void)? = nil
     var onStrokeBegan: (() -> Void)? = nil
     var onStrokeEnded: (() -> Void)? = nil
 
@@ -27,6 +30,9 @@ struct CanvasView: View {
                                     initialContentSize: initialContentSize,
                                     scraps: scraps,
                                     tool: palette.pkTool,
+                                    toolKind: palette.tool,
+                                    lassoMode: palette.lassoMode,
+                                    prefersNativeToolRendering: palette.tool == .eraser || palette.tool == .lasso,
                                     undoTrigger: palette.undoTrigger,
                                     redoTrigger: palette.redoTrigger,
                                     isMainCanvasActive: palette.lastActiveCanvas == .main,
@@ -35,6 +41,7 @@ struct CanvasView: View {
                                     onDrop: onDrop,
                                     onScrapMoved: onScrapMoved,
                                     onScrapResized: onScrapResized,
+                                    onScrapEditRequested: onScrapEditRequested,
                                     onScrapDeleted: onScrapDeleted,
                                     onUndoRedoStateChanged: { canUndo, canRedo in
                                         DispatchQueue.main.async {
@@ -45,10 +52,11 @@ struct CanvasView: View {
                                     onMainCanvasActivated: {
                                         DispatchQueue.main.async {
                                             palette.lastActiveCanvas = .main
+                                            onCanvasActivated?()
                                         }
                                     },
                                     onPencilTap: {
-                                        palette.switchToPreviousTool()
+                                        onPencilTap?()
                                     },
                                     onZoomChanged: onZoomChanged,
                                     onStrokeBegan: onStrokeBegan,
