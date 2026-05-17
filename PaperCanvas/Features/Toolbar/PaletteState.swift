@@ -219,6 +219,16 @@ enum ActiveCanvas: String, Codable {
     case pdfInk
 }
 
+struct MarkerSubmode: Codable, Equatable {
+    var inkEnabled: Bool
+    var highlightEnabled: Bool
+    var regionEnabled: Bool
+
+    static let allEnabled = MarkerSubmode(inkEnabled: true,
+                                          highlightEnabled: true,
+                                          regionEnabled: true)
+}
+
 @Observable
 @MainActor
 final class PaletteState {
@@ -257,6 +267,13 @@ final class PaletteState {
     var lassoMode: LassoMode = .freeform {
         didSet {
             guard lassoMode != oldValue else { return }
+            save()
+        }
+    }
+
+    var markerSubmode: MarkerSubmode = .allEnabled {
+        didSet {
+            guard markerSubmode != oldValue else { return }
             save()
         }
     }
@@ -351,6 +368,12 @@ final class PaletteState {
     func setLassoMode(_ mode: LassoMode) {
         guard lassoMode != mode else { return }
         lassoMode = mode
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    func setMarkerSubmode(_ submode: MarkerSubmode) {
+        guard markerSubmode != submode else { return }
+        markerSubmode = submode
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
@@ -520,6 +543,7 @@ final class PaletteState {
         var penKind: String?
         var eraserMode: String?
         var lassoMode: String?
+        var markerSubmode: MarkerSubmode?
         var color: ColorComponents
         var widths: [String: CGFloat]
         var penWidths: [String: CGFloat]?
@@ -536,6 +560,7 @@ final class PaletteState {
             penKind: penKind.rawValue,
             eraserMode: eraserMode.rawValue,
             lassoMode: lassoMode.rawValue,
+            markerSubmode: markerSubmode,
             color: ColorComponents.from(color),
             widths: Dictionary(uniqueKeysWithValues: widths.map { ($0.key.rawValue, $0.value) }),
             penWidths: Dictionary(uniqueKeysWithValues: penWidths.map { ($0.key.rawValue, $0.value) }),
@@ -596,6 +621,9 @@ final class PaletteState {
         if let savedLassoMode = snap.lassoMode,
            let mode = LassoMode(rawValue: savedLassoMode) {
             lassoMode = mode
+        }
+        if let savedMarkerSubmode = snap.markerSubmode {
+            markerSubmode = savedMarkerSubmode
         }
         if let kind = ToolKind(rawValue: snap.tool) {
             tool = kind

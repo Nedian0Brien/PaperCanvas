@@ -50,6 +50,12 @@ final class PaperDocument {
     @Relationship(deleteRule: .cascade, inverse: \PageInk.document)
     var pageInks: [PageInk] = []
 
+    @Relationship(deleteRule: .cascade, inverse: \PDFTextHighlight.document)
+    var textHighlights: [PDFTextHighlight] = []
+
+    @Relationship(deleteRule: .cascade, inverse: \PDFRegionMark.document)
+    var regionMarks: [PDFRegionMark] = []
+
     var folder: PaperFolder?
 
     init(title: String,

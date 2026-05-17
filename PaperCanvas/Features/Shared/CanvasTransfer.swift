@@ -44,4 +44,50 @@ struct CanvasDropPayload {
     let position: CGPoint
     let sourcePageIndex: Int
     let sourceRect: CGRect
+    let anchorKind: PDFAnchorKind?
+    let anchorID: UUID?
+
+    init(kind: ScrapKind,
+         text: String?,
+         imageData: Data?,
+         position: CGPoint,
+         sourcePageIndex: Int,
+         sourceRect: CGRect,
+         anchorKind: PDFAnchorKind? = nil,
+         anchorID: UUID? = nil) {
+        self.kind = kind
+        self.text = text
+        self.imageData = imageData
+        self.position = position
+        self.sourcePageIndex = sourcePageIndex
+        self.sourceRect = sourceRect
+        self.anchorKind = anchorKind
+        self.anchorID = anchorID
+    }
+}
+
+final class AnchorDragPayload: NSObject {
+    let anchorKind: PDFAnchorKind
+    let anchorID: UUID
+    let scrapKind: ScrapKind
+    let text: String?
+    let imageData: Data?
+    let pageIndex: Int
+    let pageRect: CGRect
+
+    init(anchorKind: PDFAnchorKind,
+         anchorID: UUID,
+         scrapKind: ScrapKind,
+         text: String?,
+         imageData: Data?,
+         pageIndex: Int,
+         pageRect: CGRect) {
+        self.anchorKind = anchorKind
+        self.anchorID = anchorID
+        self.scrapKind = scrapKind
+        self.text = text
+        self.imageData = imageData
+        self.pageIndex = pageIndex
+        self.pageRect = pageRect
+    }
 }

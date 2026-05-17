@@ -24,6 +24,10 @@ struct RootSplitView: View {
     @State private var currentPageIndex: Int = 0
     @State private var navigationTarget: PDFNavigationTarget?
     @State private var canvasResetTrigger: UUID?
+    @State private var anchorScrapListAnchor: AnchorRef?
+    @State private var anchorScrapListItems: [ScrapItem] = []
+    @State private var pendingDeletion: PendingAnchorDeletion?
+    @AppStorage("PaperCanvas.anchorScrapDeletionMode") private var anchorScrapDeletionModeRaw: String = ""
     @State private var leftFraction: CGFloat = 0.5
     @State private var loadError: String?
     @State private var didLoadNote = false
@@ -140,6 +144,52 @@ struct RootSplitView: View {
                 onCancel: { textNoteDraft = nil },
                 onSave: saveTextNote
             )
+        }
+        .sheet(item: $anchorScrapListAnchor) { anchor in
+            AnchorScrapsSheet(
+                anchor: anchor,
+                scraps: anchorScrapListItems,
+                onSelect: { scrap in
+                    centerCanvasOn(scrap: scrap)
+                    anchorScrapListAnchor = nil
+                },
+                onDelete: { scrap in
+                    requestDeletion(.scrap(scrap))
+                },
+                onClose: { anchorScrapListAnchor = nil }
+            )
+            .presentationDetents([.fraction(0.35), .medium])
+        }
+        .confirmationDialog(
+            "연결된 항목도 함께 삭제하시겠어요?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { isPresented in
+                    if !isPresented { pendingDeletion = nil }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDeletion
+        ) { deletion in
+            Button("이 항목만 삭제", role: .destructive) {
+                if deletion.rememberChoice {
+                    anchorScrapDeletionModeRaw = AnchorDeletionMode.independent.rawValue
+                }
+                performDeletion(target: deletion.target, cascade: false)
+                pendingDeletion = nil
+            }
+            Button("연결된 것도 함께 삭제", role: .destructive) {
+                if deletion.rememberChoice {
+                    anchorScrapDeletionModeRaw = AnchorDeletionMode.cascade.rawValue
+                }
+                performDeletion(target: deletion.target, cascade: true)
+                pendingDeletion = nil
+            }
+            Button("취소", role: .cancel) {
+                pendingDeletion = nil
+            }
+        } message: { _ in
+            Text("이 선택을 기억해 다음부터 자동 적용됩니다.")
         }
         .task { setupInitialActivePapers() }
         .task(id: activeNotePaperID) { await loadNoteIfNeeded() }
@@ -330,7 +380,12 @@ struct RootSplitView: View {
                        navigationTarget: $navigationTarget,
                        pageInkStrokes: $pdfInkStrokes,
                        palette: palettePDF,
+                       textHighlights: activeNotePaper?.textHighlights ?? [],
+                       regionMarks: activeNotePaper?.regionMarks ?? [],
                        onRegionCaptured: handleRegionCaptured,
+                       onTextHighlightCreated: handleTextHighlightCreated,
+                       onAnchorTapped: handleAnchorTapped,
+                       onAnchorDragRequested: anchorDragItems,
                        onPDFInkActivated: {
                            activeInputSurface = .note
                        },
@@ -382,29 +437,165 @@ struct RootSplitView: View {
                           y: scrap.sourceRectY,
                           width: scrap.sourceRectW,
                           height: scrap.sourceRectH)
-        if scrap.kind == .text, rect.isEmpty {
+        if scrap.kind == .text, rect.isEmpty, scrap.anchorID == nil {
             beginEditingTextNote(id)
             return
         }
-        navigationTarget = PDFNavigationTarget(pageIndex: scrap.sourcePageIndex,
-                                               pageRect: rect)
+        jumpToSource(scrap: scrap)
+    }
+
+    private func jumpToSource(scrap: ScrapItem) {
+        let pageRect = CGRect(x: scrap.sourceRectX,
+                              y: scrap.sourceRectY,
+                              width: scrap.sourceRectW,
+                              height: scrap.sourceRectH)
+        let pageIndex = scrap.sourcePageIndex
+        let targetPaperID = findAnchorPaperID(for: scrap)
+        if let targetID = targetPaperID, targetID != activeNotePaperID,
+           let targetPaper = libraryPapers.first(where: { $0.id == targetID }) {
+            // Temporarily swap the note pane to the anchor's source paper.
+            // Once a tab system lands this branch becomes openInNewTab(...).
+            switchToPaper(targetPaper)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                navigationTarget = PDFNavigationTarget(pageIndex: pageIndex,
+                                                      pageRect: pageRect)
+            }
+        } else {
+            navigationTarget = PDFNavigationTarget(pageIndex: pageIndex,
+                                                  pageRect: pageRect)
+        }
+    }
+
+    private func findAnchorPaperID(for scrap: ScrapItem) -> UUID? {
+        guard let kind = scrap.anchorKind, let id = scrap.anchorID else {
+            // No anchor — assume the source is the active note paper.
+            return activeNotePaperID
+        }
+        switch kind {
+        case .text:
+            for paper in libraryPapers {
+                if paper.textHighlights.contains(where: { $0.id == id }) {
+                    return paper.id
+                }
+            }
+        case .region:
+            for paper in libraryPapers {
+                if paper.regionMarks.contains(where: { $0.id == id }) {
+                    return paper.id
+                }
+            }
+        }
+        return nil
+    }
+
+    private func handleAnchorTapped(_ anchor: AnchorRef) {
+        let matchingScraps = libraryPapers
+            .flatMap { $0.scrapItems }
+            .filter { $0.anchorID == anchor.id }
+        if matchingScraps.isEmpty { return }
+        let sorted = matchingScraps.sorted { $0.createdAt < $1.createdAt }
+        if let first = sorted.first {
+            centerCanvasOn(scrap: first)
+        }
+        if sorted.count > 1 {
+            anchorScrapListAnchor = anchor
+            anchorScrapListItems = sorted
+        }
+    }
+
+    private func centerCanvasOn(scrap: ScrapItem) {
+        // If the scrap belongs to a different canvas paper, switch canvas pane
+        // first (mirroring the cross-paper note jump).
+        if let parent = scrap.document, parent.id != activeCanvasPaperID {
+            switchToPaper(parent)
+        }
+        // Pan the canvas so the scrap is centered.
+        let target = CGPoint(
+            x: max(0, CGFloat(scrap.positionX) + CGFloat(scrap.width) / 2 - 200),
+            y: max(0, CGFloat(scrap.positionY) + CGFloat(scrap.height) / 2 - 200)
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            contentOffset = target
+        }
+    }
+
+    private func anchorDragItems(_ anchor: AnchorRef) -> [UIDragItem] {
+        guard let note = activeNotePaper,
+              note.id == activeNotePaperID,
+              let pdfDocument = pdfDocument,
+              anchor.pageIndex >= 0,
+              anchor.pageIndex < pdfDocument.pageCount,
+              let page = pdfDocument.page(at: anchor.pageIndex) else { return [] }
+        switch anchor.kind {
+        case .text:
+            guard let highlight = note.textHighlights.first(where: { $0.id == anchor.id }) else { return [] }
+            let selection = selectionFromQuads(highlight.quadPoints, on: page)
+            let text = selection?.string ?? ""
+            guard !text.isEmpty else { return [] }
+            let payload = AnchorDragPayload(
+                anchorKind: .text,
+                anchorID: highlight.id,
+                scrapKind: .text,
+                text: text,
+                imageData: nil,
+                pageIndex: highlight.pageIndex,
+                pageRect: highlight.boundingPageRect
+            )
+            let provider = NSItemProvider(object: text as NSString)
+            let item = UIDragItem(itemProvider: provider)
+            item.localObject = payload
+            return [item]
+        case .region:
+            guard let mark = note.regionMarks.first(where: { $0.id == anchor.id }) else { return [] }
+            let image = MarkerGestureController.renderPDFRegion(page: page,
+                                                                rect: mark.pageRect,
+                                                                scale: 2.0)
+            guard let data = image.pngData() else { return [] }
+            let payload = AnchorDragPayload(
+                anchorKind: .region,
+                anchorID: mark.id,
+                scrapKind: .image,
+                text: nil,
+                imageData: data,
+                pageIndex: mark.pageIndex,
+                pageRect: mark.pageRect
+            )
+            let provider = NSItemProvider(object: image)
+            let item = UIDragItem(itemProvider: provider)
+            item.localObject = payload
+            return [item]
+        }
+    }
+
+    private func selectionFromQuads(_ quads: [CGRect], on page: PDFPage) -> PDFSelection? {
+        guard let first = quads.first, let last = quads.last else { return nil }
+        let topLeft = CGPoint(x: first.minX + 1, y: first.midY)
+        let bottomRight = CGPoint(x: last.maxX - 1, y: last.midY)
+        return page.selection(from: topLeft, to: bottomRight)
     }
 
     private func handleRegionCaptured(pageIndex: Int, pageRect: CGRect, image: UIImage) {
-        guard let data = image.pngData() else { return }
-        let position = CGPoint(x: contentOffset.x + 80, y: contentOffset.y + 80)
-        let displaySize = imageDisplaySize(for: image)
-        let scrap = ScrapItem(
-            kind: .image,
-            imageData: data,
-            position: position,
-            size: displaySize,
-            sourcePageIndex: pageIndex,
-            sourceRect: pageRect
-        )
-        scrap.document = activeCanvasPaper
-        modelContext.insert(scrap)
-        activeCanvasPaper?.updatedAt = .now
+        guard let note = activeNotePaper else { return }
+        let colorHex = AnchorColor.hex(from: UIColor(palettePDF.color).cgColor)
+        let mark = PDFRegionMark(pageIndex: pageIndex,
+                                 rect: pageRect,
+                                 colorHex: colorHex)
+        mark.document = note
+        modelContext.insert(mark)
+        note.updatedAt = .now
+        scheduleSave()
+    }
+
+    private func handleTextHighlightCreated(pageIndex: Int,
+                                            quadPoints: [CGRect],
+                                            colorHex: String) {
+        guard let note = activeNotePaper else { return }
+        let highlight = PDFTextHighlight(pageIndex: pageIndex,
+                                         quadPoints: quadPoints,
+                                         colorHex: colorHex)
+        highlight.document = note
+        modelContext.insert(highlight)
+        note.updatedAt = .now
         scheduleSave()
     }
 
@@ -433,9 +624,78 @@ struct RootSplitView: View {
 
     private func handleScrapDeleted(_ id: UUID) {
         guard let scrap = (activeCanvasPaper?.scrapItems ?? []).first(where: { $0.id == id }) else { return }
+        if scrap.anchorID != nil {
+            requestDeletion(.scrap(scrap))
+            return
+        }
         modelContext.delete(scrap)
         activeCanvasPaper?.updatedAt = .now
         scheduleSave()
+    }
+
+    private var anchorScrapDeletionMode: AnchorDeletionMode {
+        AnchorDeletionMode(rawValue: anchorScrapDeletionModeRaw) ?? .ask
+    }
+
+    private func requestDeletion(_ target: PendingAnchorDeletion.Target) {
+        let mode = anchorScrapDeletionMode
+        switch mode {
+        case .independent:
+            performDeletion(target: target, cascade: false)
+        case .cascade:
+            performDeletion(target: target, cascade: true)
+        case .ask:
+            pendingDeletion = PendingAnchorDeletion(target: target, rememberChoice: true)
+        }
+    }
+
+    private func performDeletion(target: PendingAnchorDeletion.Target, cascade: Bool) {
+        switch target {
+        case .scrap(let scrap):
+            if cascade, let kind = scrap.anchorKind, let aid = scrap.anchorID {
+                deleteAnchor(kind: kind, id: aid)
+            }
+            modelContext.delete(scrap)
+            scrap.document?.updatedAt = .now
+        case .textHighlight(let id):
+            if cascade {
+                deleteScrapsAttachedTo(anchorID: id)
+            }
+            if let highlight = activeNotePaper?.textHighlights.first(where: { $0.id == id }) {
+                modelContext.delete(highlight)
+                activeNotePaper?.updatedAt = .now
+            }
+        case .regionMark(let id):
+            if cascade {
+                deleteScrapsAttachedTo(anchorID: id)
+            }
+            if let mark = activeNotePaper?.regionMarks.first(where: { $0.id == id }) {
+                modelContext.delete(mark)
+                activeNotePaper?.updatedAt = .now
+            }
+        }
+        scheduleSave()
+    }
+
+    private func deleteAnchor(kind: PDFAnchorKind, id: UUID) {
+        switch kind {
+        case .text:
+            if let highlight = libraryPapers.flatMap(\.textHighlights).first(where: { $0.id == id }) {
+                modelContext.delete(highlight)
+            }
+        case .region:
+            if let mark = libraryPapers.flatMap(\.regionMarks).first(where: { $0.id == id }) {
+                modelContext.delete(mark)
+            }
+        }
+    }
+
+    private func deleteScrapsAttachedTo(anchorID: UUID) {
+        let scraps = libraryPapers.flatMap(\.scrapItems).filter { $0.anchorID == anchorID }
+        for scrap in scraps {
+            modelContext.delete(scrap)
+            scrap.document?.updatedAt = .now
+        }
     }
 
     private func handleCanvasDrop(_ payload: CanvasDropPayload) {
@@ -447,7 +707,9 @@ struct RootSplitView: View {
             position: payload.position,
             size: size,
             sourcePageIndex: payload.sourcePageIndex,
-            sourceRect: payload.sourceRect
+            sourceRect: payload.sourceRect,
+            anchorKind: payload.anchorKind,
+            anchorID: payload.anchorID
         )
         scrap.document = activeCanvasPaper
         modelContext.insert(scrap)
@@ -845,6 +1107,110 @@ struct RootSplitView: View {
         persistAll()
         accessingURL?.stopAccessingSecurityScopedResource()
         accessingURL = nil
+    }
+}
+
+enum AnchorDeletionMode: String {
+    case independent
+    case cascade
+    case ask
+}
+
+struct PendingAnchorDeletion: Identifiable {
+    enum Target {
+        case scrap(ScrapItem)
+        case textHighlight(UUID)
+        case regionMark(UUID)
+    }
+    let id = UUID()
+    let target: Target
+    var rememberChoice: Bool
+}
+
+struct AnchorScrapsSheet: View {
+    let anchor: AnchorRef
+    let scraps: [ScrapItem]
+    let onSelect: (ScrapItem) -> Void
+    let onDelete: (ScrapItem) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(scraps, id: \.id) { scrap in
+                        Button {
+                            onSelect(scrap)
+                        } label: {
+                            HStack(spacing: 12) {
+                                anchorPreview(for: scrap)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(label(for: scrap))
+                                        .font(.body)
+                                        .foregroundStyle(Color.Ink.primary)
+                                        .lineLimit(2)
+                                    Text(scrap.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption)
+                                        .foregroundStyle(Color.Ink.tertiary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                onDelete(scrap)
+                            } label: {
+                                Label("삭제", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("연결된 노드 \(scraps.count)개")
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle(anchor.kind == .text ? "텍스트 하이라이트" : "영역")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("닫기", action: onClose)
+                }
+            }
+        }
+    }
+
+    private func label(for scrap: ScrapItem) -> String {
+        switch scrap.kind {
+        case .text:
+            return scrap.text?.replacingOccurrences(of: "\n", with: " ") ?? "(빈 노드)"
+        case .image:
+            return "이미지 노드"
+        }
+    }
+
+    @ViewBuilder
+    private func anchorPreview(for scrap: ScrapItem) -> some View {
+        switch scrap.kind {
+        case .text:
+            Image(systemName: "text.alignleft")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(Color.Ink.secondary)
+                .frame(width: 44, height: 44)
+                .background(Color.Surface.fill, in: RoundedRectangle(cornerRadius: 8))
+        case .image:
+            if let data = scrap.imageData, let img = UIImage(data: data) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                Image(systemName: "photo")
+                    .frame(width: 44, height: 44)
+                    .background(Color.Surface.fill, in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
     }
 }
 

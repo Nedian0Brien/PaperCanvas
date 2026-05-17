@@ -154,6 +154,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         context.coordinator.syncScraps(in: canvas, with: scraps)
         context.coordinator.handleResetIfNeeded(canvas)
         context.coordinator.handleUndoRedoIfNeeded(canvas)
+        context.coordinator.applyExternalOffsetIfNeeded(canvas)
     }
 
     @MainActor
@@ -232,6 +233,23 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                 viewport: viewport, panInWorld: panInWorld, zoom: zoom
             )
             inkMetalView.setNeedsDisplay()
+        }
+
+        /// Apply a programmatic content-offset change requested by the parent
+        /// (e.g. a node tap that wants to recenter the canvas). We threshold
+        /// because the binding is also driven by user scrolling, and a
+        /// re-application during a normal scroll would fight the user.
+        func applyExternalOffsetIfNeeded(_ canvas: PKCanvasView) {
+            guard didApplyInitialOffset else { return }
+            let current = canvas.contentOffset
+            let target = parent.contentOffset
+            let dx = abs(current.x - target.x)
+            let dy = abs(current.y - target.y)
+            guard dx > 1 || dy > 1 else { return }
+            // Only programmatic when the user isn't actively scrolling.
+            guard !canvas.isDragging, !canvas.isDecelerating else { return }
+            canvas.setContentOffset(target, animated: true)
+            updateCameraMatrix()
         }
 
         func applyInitialOffsetIfNeeded(_ canvas: PKCanvasView) {
@@ -648,6 +666,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         // MARK: - UIDropInteraction
 
         func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
+            if session.items.contains(where: { $0.localObject is AnchorDragPayload }) { return true }
             if session.items.contains(where: { $0.localObject is TextScrapPayload }) { return true }
             if session.items.contains(where: { $0.localObject is ImageScrapPayload }) { return true }
             return session.canLoadObjects(ofClass: NSString.self)
@@ -661,6 +680,21 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
             guard let canvas = interaction.view as? PKCanvasView ?? self.canvas else { return }
             let location = session.location(in: canvas)
+
+            if let anchorPayload = session.items.compactMap({ $0.localObject as? AnchorDragPayload }).first {
+                let payload = CanvasDropPayload(
+                    kind: anchorPayload.scrapKind,
+                    text: anchorPayload.text,
+                    imageData: anchorPayload.imageData,
+                    position: location,
+                    sourcePageIndex: anchorPayload.pageIndex,
+                    sourceRect: anchorPayload.pageRect,
+                    anchorKind: anchorPayload.anchorKind,
+                    anchorID: anchorPayload.anchorID
+                )
+                parent.onDrop?(payload)
+                return
+            }
 
             if let textPayload = session.items.compactMap({ $0.localObject as? TextScrapPayload }).first {
                 let payload = CanvasDropPayload(

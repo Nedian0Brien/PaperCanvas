@@ -33,6 +33,7 @@ struct PaletteToolbar: View {
 
     private enum PaletteEditor: Identifiable, Equatable {
         case pen
+        case marker
         case width(Int)
         case color(Int)
 
@@ -40,6 +41,8 @@ struct PaletteToolbar: View {
             switch self {
             case .pen:
                 return "pen"
+            case .marker:
+                return "marker"
             case .width(let index):
                 return "width-\(index)"
             case .color(let index):
@@ -116,6 +119,13 @@ struct PaletteToolbar: View {
                 .padding(10)
                 .presentationCompactAdaptation(.popover)
         }
+        .popover(isPresented: markerEditorPresentedBinding,
+                 attachmentAnchor: .point(markerPopoverAnchor),
+                 arrowEdge: popoverArrowEdge) {
+            markerSubmodePicker
+                .padding(12)
+                .presentationCompactAdaptation(.popover)
+        }
     }
 
     private var toolSegments: [SegmentedPaletteItem] {
@@ -145,6 +155,8 @@ struct PaletteToolbar: View {
         closePropertyEditors()
         if kind == .pen {
             activeEditor = .pen
+        } else if kind == .marker {
+            activeEditor = .marker
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
@@ -176,6 +188,70 @@ struct PaletteToolbar: View {
                 .padding(10)
                 .presentationCompactAdaptation(.popover)
         }
+        .popover(isPresented: markerEditorPresentedBinding,
+                 attachmentAnchor: .point(verticalMarkerPopoverAnchor),
+                 arrowEdge: popoverArrowEdge) {
+            markerSubmodePicker
+                .padding(12)
+                .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private var markerSubmodePicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("형광펜 모드")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.Ink.secondary)
+                .padding(.bottom, 2)
+            markerSubmodeRow(title: "잉크 스트로크",
+                             systemImage: "scribble",
+                             isOn: Binding(
+                                get: { palette.markerSubmode.inkEnabled },
+                                set: { newValue in
+                                    var s = palette.markerSubmode
+                                    s.inkEnabled = newValue
+                                    palette.setMarkerSubmode(s)
+                                }
+                             ))
+            markerSubmodeRow(title: "텍스트 하이라이트",
+                             systemImage: "highlighter",
+                             isOn: Binding(
+                                get: { palette.markerSubmode.highlightEnabled },
+                                set: { newValue in
+                                    var s = palette.markerSubmode
+                                    s.highlightEnabled = newValue
+                                    palette.setMarkerSubmode(s)
+                                }
+                             ))
+            markerSubmodeRow(title: "영역 선택 (꾹 누르기)",
+                             systemImage: "rectangle.dashed",
+                             isOn: Binding(
+                                get: { palette.markerSubmode.regionEnabled },
+                                set: { newValue in
+                                    var s = palette.markerSubmode
+                                    s.regionEnabled = newValue
+                                    palette.setMarkerSubmode(s)
+                                }
+                             ))
+        }
+        .frame(width: 220)
+    }
+
+    private func markerSubmodeRow(title: String,
+                                  systemImage: String,
+                                  isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 18)
+                Text(title)
+                    .font(.system(size: 14))
+            }
+            .foregroundStyle(Color.Ink.primary)
+        }
+        .toggleStyle(.switch)
+        .controlSize(.small)
     }
 
     private var penPicker: some View {
@@ -233,6 +309,17 @@ struct PaletteToolbar: View {
         )
     }
 
+    private var markerEditorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { activeEditor == .marker },
+            set: { isPresented in
+                if !isPresented, activeEditor == .marker {
+                    activeEditor = nil
+                }
+            }
+        )
+    }
+
     private var toolPopoverAnchor: UnitPoint {
         segmentAnchorPoint(
             index: ToolKind.allCases.firstIndex(of: .pen),
@@ -243,6 +330,21 @@ struct PaletteToolbar: View {
     private var verticalToolPopoverAnchor: UnitPoint {
         segmentAnchorPoint(
             index: ToolKind.allCases.firstIndex(of: .pen),
+            count: ToolKind.allCases.count,
+            axis: .vertical
+        )
+    }
+
+    private var markerPopoverAnchor: UnitPoint {
+        segmentAnchorPoint(
+            index: ToolKind.allCases.firstIndex(of: .marker),
+            count: ToolKind.allCases.count
+        )
+    }
+
+    private var verticalMarkerPopoverAnchor: UnitPoint {
+        segmentAnchorPoint(
+            index: ToolKind.allCases.firstIndex(of: .marker),
             count: ToolKind.allCases.count,
             axis: .vertical
         )

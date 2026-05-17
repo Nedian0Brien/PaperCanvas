@@ -22,6 +22,8 @@ final class ScrapItem {
     var sourceRectW: Double
     var sourceRectH: Double
     var createdAt: Date
+    var anchorKindRaw: String?
+    var anchorID: UUID?
 
     var document: PaperDocument?
 
@@ -30,13 +32,23 @@ final class ScrapItem {
         set { kindRaw = newValue.rawValue }
     }
 
+    var anchorKind: PDFAnchorKind? {
+        get {
+            guard let raw = anchorKindRaw else { return nil }
+            return PDFAnchorKind(rawValue: raw)
+        }
+        set { anchorKindRaw = newValue?.rawValue }
+    }
+
     init(kind: ScrapKind,
          text: String? = nil,
          imageData: Data? = nil,
          position: CGPoint,
          size: CGSize,
          sourcePageIndex: Int,
-         sourceRect: CGRect) {
+         sourceRect: CGRect,
+         anchorKind: PDFAnchorKind? = nil,
+         anchorID: UUID? = nil) {
         self.id = UUID()
         self.kindRaw = kind.rawValue
         self.text = text
@@ -51,5 +63,7 @@ final class ScrapItem {
         self.sourceRectW = sourceRect.width
         self.sourceRectH = sourceRect.height
         self.createdAt = .now
+        self.anchorKindRaw = anchorKind?.rawValue
+        self.anchorID = anchorID
     }
 }

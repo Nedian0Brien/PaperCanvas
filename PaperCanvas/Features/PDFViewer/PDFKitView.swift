@@ -8,7 +8,12 @@ struct PDFKitView: UIViewRepresentable {
     @Binding var navigationTarget: PDFNavigationTarget?
     @Binding var pageInkStrokes: [Int: [InkStroke]]
     let palette: PaletteState
+    var textHighlights: [PDFTextHighlight] = []
+    var regionMarks: [PDFRegionMark] = []
     var onRegionCaptured: ((Int, CGRect, UIImage) -> Void)? = nil
+    var onTextHighlightCreated: ((Int, [CGRect], String) -> Void)? = nil
+    var onAnchorTapped: ((AnchorRef) -> Void)? = nil
+    var onAnchorDragRequested: ((AnchorRef) -> [UIDragItem])? = nil
     var onPDFInkActivated: (() -> Void)? = nil
     var onPencilTap: (() -> Void)? = nil
 
@@ -53,11 +58,17 @@ struct PDFKitView: UIViewRepresentable {
                                    pencilInput: pencilInput)
         pdfView.document = document
 
-        let marquee = RegionMarqueeController(pdfView: pdfView)
-        marquee.onRegionCaptured = { [weak coord = context.coordinator] pageIdx, rect, img in
+        let marker = MarkerGestureController(pdfView: pdfView, palette: palette)
+        marker.onRegionCaptured = { [weak coord = context.coordinator] pageIdx, rect, img in
             coord?.parent.onRegionCaptured?(pageIdx, rect, img)
         }
-        context.coordinator.regionMarquee = marquee
+        context.coordinator.markerGesture = marker
+
+        let anchorOverlay = PDFAnchorOverlay(pdfView: pdfView)
+        anchorOverlay.delegate = context.coordinator
+        pdfView.addSubview(anchorOverlay)
+        anchorOverlay.frame = pdfView.bounds
+        context.coordinator.anchorOverlay = anchorOverlay
 
         DispatchQueue.main.async {
             if let page = document.page(at: currentPageIndex) {
@@ -65,6 +76,7 @@ struct PDFKitView: UIViewRepresentable {
             }
             pdfView.layoutDocumentView()
             context.coordinator.rebuildRenderedInk()
+            context.coordinator.syncAnchorOverlay()
         }
         return wrapper
     }
@@ -96,6 +108,7 @@ struct PDFKitView: UIViewRepresentable {
 
         context.coordinator.syncExternalStrokesIfNeeded()
         context.coordinator.handleUndoRedoIfNeeded()
+        context.coordinator.syncAnchorOverlay()
     }
 
     static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
@@ -103,10 +116,15 @@ struct PDFKitView: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, UIDragInteractionDelegate, UIPencilInteractionDelegate, @preconcurrency PDFPageOverlayViewProvider {
+    final class Coordinator: NSObject, UIDragInteractionDelegate, UIPencilInteractionDelegate, @preconcurrency PDFPageOverlayViewProvider, PDFAnchorOverlayDelegate {
         var parent: PDFKitView
         var lastConsumedTargetID: UUID?
-        var regionMarquee: RegionMarqueeController?
+        var markerGesture: MarkerGestureController?
+        weak var anchorOverlay: PDFAnchorOverlay?
+
+        // Text-highlight mode (marker tool, drag-from-text)
+        private var activeHighlightPageIndex: Int?
+        private var activeHighlightStartPagePoint: CGPoint?
 
         private weak var wrapper: UIView?
         weak var hostPDFView: PDFView?
@@ -258,6 +276,10 @@ struct PDFKitView: UIViewRepresentable {
                 handleLassoInput(phase: phase, touches: touches)
                 return
             }
+            if parent.palette.tool == .marker {
+                handleMarkerInput(phase: phase, touches: touches)
+                return
+            }
             switch phase {
             case .began:
                 beginStroke(with: touches)
@@ -269,6 +291,125 @@ struct PDFKitView: UIViewRepresentable {
             case .cancelled:
                 cancelActiveStroke()
             }
+        }
+
+        // MARK: - Marker (scrap) input
+
+        private func handleMarkerInput(phase: PDFPencilInputPhase, touches: [UITouch]) {
+            let submode = parent.palette.markerSubmode
+            switch phase {
+            case .began:
+                if submode.highlightEnabled,
+                   let pdfView = hostPDFView,
+                   let touch = touches.first,
+                   let document = pdfView.document {
+                    let location = touch.preciseLocation(in: pdfView)
+                    if let page = pdfView.page(for: location, nearest: false) {
+                        let pagePoint = pdfView.convert(location, to: page)
+                        if page.characterIndex(at: pagePoint) >= 0 {
+                            activeHighlightPageIndex = document.index(for: page)
+                            activeHighlightStartPagePoint = pagePoint
+                            pdfView.currentSelection = nil
+                            parent.palette.isStrokeInProgress = true
+                            return
+                        }
+                    }
+                }
+                if submode.inkEnabled {
+                    beginStroke(with: touches)
+                }
+            case .moved:
+                if let pageIndex = activeHighlightPageIndex,
+                   let start = activeHighlightStartPagePoint,
+                   let pdfView = hostPDFView,
+                   let document = pdfView.document,
+                   let page = document.page(at: pageIndex),
+                   let touch = touches.first {
+                    let location = touch.preciseLocation(in: pdfView)
+                    let endPagePoint = pdfView.convert(location, to: page)
+                    if let selection = page.selection(from: start, to: endPagePoint) {
+                        pdfView.currentSelection = selection
+                    }
+                    return
+                }
+                if activeStroke != nil {
+                    appendTouchesToActiveStroke(touches)
+                }
+            case .ended:
+                if activeHighlightPageIndex != nil {
+                    finalizeTextHighlight()
+                    return
+                }
+                if activeStroke != nil {
+                    appendTouchesToActiveStroke(touches)
+                    finishActiveStroke()
+                }
+            case .cancelled:
+                if activeHighlightPageIndex != nil {
+                    cancelTextHighlight()
+                    return
+                }
+                if activeStroke != nil {
+                    cancelActiveStroke()
+                }
+            }
+        }
+
+        private func finalizeTextHighlight() {
+            defer {
+                activeHighlightPageIndex = nil
+                activeHighlightStartPagePoint = nil
+                parent.palette.isStrokeInProgress = false
+            }
+            guard let pdfView = hostPDFView,
+                  let selection = pdfView.currentSelection,
+                  let pageIndex = activeHighlightPageIndex,
+                  let document = pdfView.document,
+                  let page = document.page(at: pageIndex) else {
+                hostPDFView?.currentSelection = nil
+                return
+            }
+            // Per-line rects so multi-line highlights wrap correctly.
+            let lineSelections = selection.selectionsByLine()
+            let quads: [CGRect] = lineSelections.compactMap { lineSel in
+                let bounds = lineSel.bounds(for: page)
+                return bounds.width > 0.5 && bounds.height > 0.5 ? bounds : nil
+            }
+            pdfView.currentSelection = nil
+            guard !quads.isEmpty else { return }
+            let colorHex = AnchorColor.hex(from: UIColor(parent.palette.color).cgColor)
+            parent.onTextHighlightCreated?(pageIndex, quads, colorHex)
+        }
+
+        private func cancelTextHighlight() {
+            hostPDFView?.currentSelection = nil
+            activeHighlightPageIndex = nil
+            activeHighlightStartPagePoint = nil
+            parent.palette.isStrokeInProgress = false
+        }
+
+        // MARK: - Anchor overlay
+
+        func syncAnchorOverlay() {
+            guard let overlay = anchorOverlay, let pdfView = hostPDFView else { return }
+            overlay.frame = pdfView.bounds
+            pdfView.bringSubviewToFront(overlay)
+            overlay.sync(textHighlights: parent.textHighlights,
+                         regionMarks: parent.regionMarks,
+                         in: pdfView)
+            overlay.relayoutForViewportChange()
+        }
+
+        // MARK: PDFAnchorOverlayDelegate
+
+        func anchorOverlay(_ overlay: PDFAnchorOverlay,
+                           didTap anchor: AnchorRef) {
+            parent.onAnchorTapped?(anchor)
+        }
+
+        func anchorOverlay(_ overlay: PDFAnchorOverlay,
+                           dragItemsFor anchor: AnchorRef) -> [UIDragItem] {
+            parent.onAnchorDragRequested?(anchor) ?? []
         }
 
         private func beginStroke(with touches: [UITouch]) {
@@ -1049,6 +1190,11 @@ struct PDFKitView: UIViewRepresentable {
                 lastViewportKey = key
                 rebuildRenderedInk()
                 refreshHoverIndicator()
+                if let overlay = anchorOverlay {
+                    overlay.frame = hostPDFView.bounds
+                    overlay.relayoutForViewportChange()
+                    hostPDFView.bringSubviewToFront(overlay)
+                }
             }
         }
 
@@ -1204,7 +1350,12 @@ struct PDFKitView: UIViewRepresentable {
             }
         }
 
-        // MARK: - Drag
+        // MARK: - Drag (selection-based fallback)
+        //
+        // Anchor-based drag is handled by PDFAnchorOverlay. The selection drag
+        // interaction remains so an ad-hoc text selection (e.g. while a
+        // non-marker tool is active) can still be dragged into the canvas
+        // without being promoted to a permanent highlight.
 
         func dragInteraction(_ interaction: UIDragInteraction,
                              itemsForBeginning session: UIDragSession) -> [UIDragItem] {
@@ -1215,6 +1366,10 @@ struct PDFKitView: UIViewRepresentable {
                   let page = selection.pages.first else {
                 return []
             }
+            // If marker is active and we just finalized a highlight, the
+            // selection might briefly persist; suppress the legacy drag so the
+            // anchor flow owns the new highlight.
+            if parent.palette.tool == .marker { return [] }
             let pageIndex = pdfView.document?.index(for: page) ?? 0
             let pageBounds = selection.bounds(for: page)
             let payload = TextScrapPayload(text: text,

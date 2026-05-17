@@ -28,6 +28,9 @@
 		B7343F3045FB25E43A269650 /* PDFKitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D3F8E38ADB78CC24A7F3E79 /* PDFKitView.swift */; };
 		E8C2A02E68EF70ADF80084CF /* ScrapItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B02E628DF9351673813C0F4 /* ScrapItem.swift */; };
 		C4D5E6F7081A2B3C4D5E6F70 /* PageInk.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E6F7081A2B3C4D5E6F7081 /* PageInk.swift */; };
+		A2C1D2E3F4051627384950A1 /* PDFAnchors.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C1D2E3F4051627384950B1 /* PDFAnchors.swift */; };
+		A2C2D2E3F4051627384950A2 /* MarkerGestureController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C2D2E3F4051627384950B2 /* MarkerGestureController.swift */; };
+		A2C3D2E3F4051627384950A3 /* PDFAnchorOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D2E3F4051627384950B3 /* PDFAnchorOverlay.swift */; };
 		E5F6A7B8C9D0E1F2A3B4C5D6 /* PDFInkCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7B8C9D0E1F2A3B4C5D6E7 /* PDFInkCanvas.swift */; };
 		F8F326E05A234A70FDBC2813 /* URLDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26250D7FC71E10C4C119EC82 /* URLDownloader.swift */; };
 		1A2B3C4D5E6F7081A2B3C4D5 /* InkStroke.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F7081A2B3C4D5E6 /* InkStroke.swift */; };
@@ -64,6 +67,9 @@
 		5087DD680AB8442C22FE6B18 /* CanvasTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTransfer.swift; sourceTree = "<group>"; };
 		5B02E628DF9351673813C0F4 /* ScrapItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrapItem.swift; sourceTree = "<group>"; };
 		D5E6F7081A2B3C4D5E6F7081 /* PageInk.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageInk.swift; sourceTree = "<group>"; };
+		B2C1D2E3F4051627384950B1 /* PDFAnchors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFAnchors.swift; sourceTree = "<group>"; };
+		B2C2D2E3F4051627384950B2 /* MarkerGestureController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkerGestureController.swift; sourceTree = "<group>"; };
+		B2C3D2E3F4051627384950B3 /* PDFAnchorOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFAnchorOverlay.swift; sourceTree = "<group>"; };
 		F6A7B8C9D0E1F2A3B4C5D6E7 /* PDFInkCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFInkCanvas.swift; sourceTree = "<group>"; };
 		6CD90B3C55111F0006A987CD /* PaperDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperDocument.swift; sourceTree = "<group>"; };
 		84B7F65F4133460646449A5B /* SharedToolPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedToolPicker.swift; sourceTree = "<group>"; };
@@ -112,6 +118,7 @@
 				A170B270C370D470E570F670 /* PaperFolder.swift */,
 				6CD90B3C55111F0006A987CD /* PaperDocument.swift */,
 				5B02E628DF9351673813C0F4 /* ScrapItem.swift */,
+				B2C1D2E3F4051627384950B1 /* PDFAnchors.swift */,
 				2B3C4D5E6F7081A2B3C4D5E6 /* InkStroke.swift */,
 			);
 			path = Models;
@@ -123,6 +130,8 @@
 				F6A7B8C9D0E1F2A3B4C5D6E7 /* PDFInkCanvas.swift */,
 				9D3F8E38ADB78CC24A7F3E79 /* PDFKitView.swift */,
 				C88B74C3BB50C919C9C10C53 /* RegionMarqueeOverlay.swift */,
+				B2C2D2E3F4051627384950B2 /* MarkerGestureController.swift */,
+				B2C3D2E3F4051627384950B3 /* PDFAnchorOverlay.swift */,
 				A2A3A4A5A6A7A8A9A0A1A2A3 /* InkPageOverlayView.swift */,
 				A150B250C350D450E550F650 /* PageJumpSheet.swift */,
 			);
@@ -424,6 +433,9 @@
 				A151B251C351D451E551F651 /* PageJumpSheet.swift in Sources */,
 				A161B261C361D461E561F661 /* SplitTopBar.swift in Sources */,
 				A171B271C371D471E571F671 /* PaperFolder.swift in Sources */,
+				A2C1D2E3F4051627384950A1 /* PDFAnchors.swift in Sources */,
+				A2C2D2E3F4051627384950A2 /* MarkerGestureController.swift in Sources */,
+				A2C3D2E3F4051627384950A3 /* PDFAnchorOverlay.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
