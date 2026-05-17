@@ -257,6 +257,39 @@ private final class AnchorBoxContainerView: UIView,
         }
     }
 
+    nonisolated func dragInteraction(_ interaction: UIDragInteraction,
+                                     previewForLifting item: UIDragItem,
+                                     session: UIDragSession) -> UITargetedDragPreview? {
+        MainActor.assumeIsolated {
+            makeDragPreview()
+        }
+    }
+
+    nonisolated func dragInteraction(_ interaction: UIDragInteraction,
+                                     previewForCancelling item: UIDragItem,
+                                     withDefault defaultPreview: UITargetedDragPreview) -> UITargetedDragPreview? {
+        MainActor.assumeIsolated {
+            makeDragPreview() ?? defaultPreview
+        }
+    }
+
+    /// The default lift preview snapshots the whole view including its
+    /// transparent regions, which iOS renders as a black rectangle. Provide a
+    /// preview clipped to just the quad rects so the user sees the actual
+    /// highlight shape lift off the page.
+    private func makeDragPreview() -> UITargetedDragPreview? {
+        guard !localQuads.isEmpty else { return nil }
+        let parameters = UIDragPreviewParameters()
+        parameters.backgroundColor = .clear
+        let combined = UIBezierPath()
+        for rect in localQuads {
+            combined.append(UIBezierPath(roundedRect: rect.insetBy(dx: -2, dy: -2),
+                                         cornerRadius: 3))
+        }
+        parameters.visiblePath = combined
+        return UITargetedDragPreview(view: self, parameters: parameters)
+    }
+
     // MARK: UIGestureRecognizerDelegate
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,

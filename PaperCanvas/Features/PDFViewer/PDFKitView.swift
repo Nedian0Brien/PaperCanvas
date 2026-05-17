@@ -62,7 +62,16 @@ struct PDFKitView: UIViewRepresentable {
         marker.onRegionCaptured = { [weak coord = context.coordinator] pageIdx, rect, img in
             coord?.parent.onRegionCaptured?(pageIdx, rect, img)
         }
+        marker.onMarqueeBegan = { [weak coord = context.coordinator] in
+            coord?.handleMarqueeBegan()
+        }
         context.coordinator.markerGesture = marker
+
+        let liveHighlight = LiveHighlightOverlay(frame: pdfView.bounds)
+        liveHighlight.pdfView = pdfView
+        liveHighlight.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        pdfView.addSubview(liveHighlight)
+        context.coordinator.liveHighlightOverlay = liveHighlight
 
         let anchorOverlay = PDFAnchorOverlay(pdfView: pdfView)
         anchorOverlay.delegate = context.coordinator
@@ -121,10 +130,12 @@ struct PDFKitView: UIViewRepresentable {
         var lastConsumedTargetID: UUID?
         var markerGesture: MarkerGestureController?
         weak var anchorOverlay: PDFAnchorOverlay?
+        weak var liveHighlightOverlay: LiveHighlightOverlay?
 
         // Text-highlight mode (marker tool, drag-from-text)
         private var activeHighlightPageIndex: Int?
         private var activeHighlightStartPagePoint: CGPoint?
+        private var activeHighlightQuads: [CGRect] = []
 
         private weak var wrapper: UIView?
         weak var hostPDFView: PDFView?
@@ -309,7 +320,9 @@ struct PDFKitView: UIViewRepresentable {
                         if page.characterIndex(at: pagePoint) >= 0 {
                             activeHighlightPageIndex = document.index(for: page)
                             activeHighlightStartPagePoint = pagePoint
+                            activeHighlightQuads = []
                             pdfView.currentSelection = nil
+                            updateLiveHighlight()
                             parent.palette.isStrokeInProgress = true
                             return
                         }
@@ -328,8 +341,14 @@ struct PDFKitView: UIViewRepresentable {
                     let location = touch.preciseLocation(in: pdfView)
                     let endPagePoint = pdfView.convert(location, to: page)
                     if let selection = page.selection(from: start, to: endPagePoint) {
-                        pdfView.currentSelection = selection
+                        activeHighlightQuads = selection.selectionsByLine().compactMap { lineSel in
+                            let bounds = lineSel.bounds(for: page)
+                            return bounds.width > 0.5 && bounds.height > 0.5 ? bounds : nil
+                        }
+                    } else {
+                        activeHighlightQuads = []
                     }
+                    updateLiveHighlight()
                     return
                 }
                 if activeStroke != nil {
@@ -355,27 +374,26 @@ struct PDFKitView: UIViewRepresentable {
             }
         }
 
+        private func updateLiveHighlight() {
+            guard let overlay = liveHighlightOverlay,
+                  let pageIndex = activeHighlightPageIndex else { return }
+            let color = UIColor(parent.palette.color)
+            overlay.update(pageIndex: pageIndex,
+                           pageRects: activeHighlightQuads,
+                           color: color)
+        }
+
         private func finalizeTextHighlight() {
             defer {
                 activeHighlightPageIndex = nil
                 activeHighlightStartPagePoint = nil
+                activeHighlightQuads = []
+                liveHighlightOverlay?.clear()
                 parent.palette.isStrokeInProgress = false
             }
-            guard let pdfView = hostPDFView,
-                  let selection = pdfView.currentSelection,
-                  let pageIndex = activeHighlightPageIndex,
-                  let document = pdfView.document,
-                  let page = document.page(at: pageIndex) else {
-                hostPDFView?.currentSelection = nil
-                return
-            }
-            // Per-line rects so multi-line highlights wrap correctly.
-            let lineSelections = selection.selectionsByLine()
-            let quads: [CGRect] = lineSelections.compactMap { lineSel in
-                let bounds = lineSel.bounds(for: page)
-                return bounds.width > 0.5 && bounds.height > 0.5 ? bounds : nil
-            }
-            pdfView.currentSelection = nil
+            guard let pageIndex = activeHighlightPageIndex else { return }
+            let quads = activeHighlightQuads
+            hostPDFView?.currentSelection = nil
             guard !quads.isEmpty else { return }
             let colorHex = AnchorColor.hex(from: UIColor(parent.palette.color).cgColor)
             parent.onTextHighlightCreated?(pageIndex, quads, colorHex)
@@ -385,7 +403,22 @@ struct PDFKitView: UIViewRepresentable {
             hostPDFView?.currentSelection = nil
             activeHighlightPageIndex = nil
             activeHighlightStartPagePoint = nil
+            activeHighlightQuads = []
+            liveHighlightOverlay?.clear()
             parent.palette.isStrokeInProgress = false
+        }
+
+        /// Called by MarkerGestureController the moment its long-press latches.
+        /// We've now committed to region mode, so drop any in-progress text
+        /// highlight or ink stroke that the pencil pipeline may have started.
+        func handleMarqueeBegan() {
+            if activeHighlightPageIndex != nil {
+                cancelTextHighlight()
+            }
+            if activeStroke != nil {
+                cancelActiveStroke()
+            }
+            hostPDFView?.currentSelection = nil
         }
 
         // MARK: - Anchor overlay
@@ -393,6 +426,10 @@ struct PDFKitView: UIViewRepresentable {
         func syncAnchorOverlay() {
             guard let overlay = anchorOverlay, let pdfView = hostPDFView else { return }
             overlay.frame = pdfView.bounds
+            if let live = liveHighlightOverlay {
+                live.frame = pdfView.bounds
+                pdfView.bringSubviewToFront(live)
+            }
             pdfView.bringSubviewToFront(overlay)
             overlay.sync(textHighlights: parent.textHighlights,
                          regionMarks: parent.regionMarks,
@@ -1194,6 +1231,11 @@ struct PDFKitView: UIViewRepresentable {
                     overlay.frame = hostPDFView.bounds
                     overlay.relayoutForViewportChange()
                     hostPDFView.bringSubviewToFront(overlay)
+                }
+                if let live = liveHighlightOverlay {
+                    live.frame = hostPDFView.bounds
+                    live.setNeedsDisplay()
+                    hostPDFView.bringSubviewToFront(live)
                 }
             }
         }

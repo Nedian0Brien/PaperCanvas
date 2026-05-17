@@ -102,9 +102,17 @@ enum AnchorColor {
         guard trimmed.count == 6, let value = UInt32(trimmed, radix: 16) else {
             return CGColor(srgbRed: 1, green: 0.9, blue: 0.2, alpha: 1)
         }
-        let r = CGFloat((value >> 16) & 0xFF) / 255.0
-        let g = CGFloat((value >> 8) & 0xFF) / 255.0
-        let b = CGFloat(value & 0xFF) / 255.0
+        var r = CGFloat((value >> 16) & 0xFF) / 255.0
+        var g = CGFloat((value >> 8) & 0xFF) / 255.0
+        var b = CGFloat(value & 0xFF) / 255.0
+        // Highlights painted in a near-black ink read as opaque rectangles
+        // once we apply the anchor's translucent fill. Promote anything that
+        // dark to a readable highlighter yellow so legacy anchors saved from
+        // an earlier build don't appear as black bars.
+        let luminance = 0.299 * r + 0.587 * g + 0.114 * b
+        if luminance < 0.35 {
+            r = 0.98; g = 0.83; b = 0.20
+        }
         return CGColor(srgbRed: r, green: g, blue: b, alpha: 1)
     }
 }

@@ -241,8 +241,26 @@ final class PaletteState {
             previousTool = oldValue
             storeCurrentWidth(for: oldValue)
             width = currentStoredWidth
+            // Marker doubles as a highlighter — if the user hasn't picked an
+            // explicitly bright color yet, default to yellow so highlights and
+            // anchor overlays are readable instead of appearing as dark boxes.
+            if tool == .marker, isColorTooDarkForHighlight(color) {
+                color = PaletteState.defaultHighlighterColor
+            }
             save()
         }
+    }
+
+    static let defaultHighlighterColor = Color(red: 0.98, green: 0.83, blue: 0.20)
+
+    private func isColorTooDarkForHighlight(_ color: Color) -> Bool {
+        let ui = UIColor(color)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+        // Perceived luminance — anything substantially below mid-tone won't
+        // read as a highlight even after the alpha pass.
+        let luminance = 0.299 * r + 0.587 * g + 0.114 * b
+        return luminance < 0.45
     }
     private(set) var previousTool: ToolKind?
 

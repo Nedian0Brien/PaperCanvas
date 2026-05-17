@@ -14,6 +14,10 @@ final class MarkerGestureController: NSObject, UIGestureRecognizerDelegate {
     /// persisting the region mark and rendering its visual overlay.
     var onRegionCaptured: ((Int, CGRect, UIImage) -> Void)?
 
+    /// Fires the moment the long-press latches into region-marquee mode, so
+    /// PDFKitView can cancel any in-flight text highlight or ink stroke.
+    var onMarqueeBegan: (() -> Void)?
+
     private var overlay: MarqueeOverlay?
 
     init(pdfView: PDFView, palette: PaletteState) {
@@ -49,10 +53,13 @@ final class MarkerGestureController: NSObject, UIGestureRecognizerDelegate {
         let loc = gesture.location(in: pdfView)
         switch gesture.state {
         case .began:
+            onMarqueeBegan?()
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             let o = MarqueeOverlay(frame: pdfView.bounds)
             o.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             o.startPoint = loc
             o.currentPoint = loc
+            o.playEntryPulse()
             pdfView.addSubview(o)
             overlay = o
         case .changed:
