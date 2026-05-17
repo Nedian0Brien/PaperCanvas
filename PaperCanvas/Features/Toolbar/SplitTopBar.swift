@@ -352,9 +352,9 @@ private struct DocumentSwitcherPanel: View {
         .frame(width: 420)
         .frame(maxHeight: 540)
         .opacity(hasAppeared ? 1 : 0)
-        .scaleEffect(hasAppeared ? 1 : 0.96, anchor: .top)
+        .scaleEffect(hasAppeared ? 1 : 0.97, anchor: .top)
         .onAppear {
-            withAnimation(Motion.morphContent.delay(0.12)) {
+            withAnimation(Motion.morphContent.delay(0.06)) {
                 hasAppeared = true
             }
         }
