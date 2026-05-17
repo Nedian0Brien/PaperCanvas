@@ -56,7 +56,6 @@ struct SplitTopBar: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: TopBarMetrics.barHeight)
-        .animation(Motion.indirectFast, value: documentSwitcherKind)
     }
 
     /// Frame morph between the title capsule and the expanded panel is driven by
@@ -308,6 +307,8 @@ private struct DocumentSwitcherPanel: View {
     let onSelectDocument: (PaperDocument) -> Void
     let onCreateDocument: () -> Void
 
+    @State private var hasAppeared = false
+
     private var visibleDocuments: [PaperDocument] {
         documents.filter { $0.documentKind == selectedKind }
     }
@@ -350,6 +351,13 @@ private struct DocumentSwitcherPanel: View {
         }
         .frame(width: 420)
         .frame(maxHeight: 540)
+        .opacity(hasAppeared ? 1 : 0)
+        .scaleEffect(hasAppeared ? 1 : 0.96, anchor: .top)
+        .onAppear {
+            withAnimation(Motion.morphContent.delay(0.12)) {
+                hasAppeared = true
+            }
+        }
     }
 
     private var createPill: some View {

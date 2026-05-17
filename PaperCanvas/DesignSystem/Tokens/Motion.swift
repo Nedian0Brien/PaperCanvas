@@ -1,9 +1,10 @@
 import SwiftUI
 
 enum Motion {
-    static let indirect: Animation = .spring(response: 0.4, dampingFraction: 0.85)
+    static let indirect: Animation = .spring(duration: 0.55, bounce: 0.18)
     static let indirectFast: Animation = .easeInOut(duration: 0.18)
     static let chromeFade: Animation = .easeInOut(duration: 0.16)
+    static let morphContent: Animation = .smooth(duration: 0.32, extraBounce: 0.0)
 
     static let chromeFadeDuration: Double = 0.16
     static let dimDuringStrokeOpacity: Double = 0.6
