@@ -123,9 +123,7 @@ struct RootSplitView: View {
             )
             .navigationTransition(.zoom(sourceID: kind,
                                         in: documentSwitcherNamespace))
-            .presentationDetents([.height(560)])
-            .presentationBackground(.clear)
-            .presentationDragIndicator(.hidden)
+            .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showingPageJumpSheet) {
             if let pdfDocument {
