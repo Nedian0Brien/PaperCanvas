@@ -95,12 +95,15 @@ struct RootSplitView: View {
     }
 
     var body: some View {
-        ZStack {
-            mainContent
-        }
-        .ignoresSafeArea(.keyboard)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            topBar
+        NavigationStack {
+            ZStack {
+                mainContent
+            }
+            .ignoresSafeArea(.keyboard)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                topBar
+            }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .sheet(item: $documentSwitcherKind) { kind in
             DocumentSwitcherPanel(
@@ -114,12 +117,11 @@ struct RootSplitView: View {
                     createDocument(of: kind)
                 }
             )
+            .navigationTransition(.zoom(sourceID: kind,
+                                        in: documentSwitcherNamespace))
             .presentationDetents([.height(560)])
             .presentationBackground(.clear)
             .presentationDragIndicator(.hidden)
-            .presentationCompactAdaptation(.popover)
-            .navigationTransition(.zoom(sourceID: kind,
-                                        in: documentSwitcherNamespace))
         }
         .sheet(isPresented: $showingPageJumpSheet) {
             if let pdfDocument {
