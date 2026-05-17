@@ -1,9 +1,24 @@
 import SwiftUI
 
+private enum DocumentSwitcherGlassID: Hashable, Sendable {
+    case note
+    case canvas
+
+    init(kind: PaperDocumentKind) {
+        switch kind {
+        case .note:   self = .note
+        case .canvas: self = .canvas
+        }
+    }
+}
+
 struct SplitTopBar: View {
     let noteTitle: String
     let canvasTitle: String
-    let documentSwitcherNamespace: Namespace.ID
+    let activeNotePaperID: UUID?
+    let activeCanvasPaperID: UUID?
+    let documents: [PaperDocument]
+    var documentSwitcherKind: PaperDocumentKind?
 
     var pageIndex: Int = 0
     var totalPages: Int = 0
@@ -15,6 +30,8 @@ struct SplitTopBar: View {
     var onRecenterCanvas: () -> Void = {}
     var onAddTextNote: () -> Void = {}
     var onToggleDocumentSwitcher: (PaperDocumentKind) -> Void = { _ in }
+    var onSelectDocument: (PaperDocument) -> Void = { _ in }
+    var onCreateDocument: (PaperDocumentKind) -> Void = { _ in }
 
     var canvasBackground: CanvasBackground = .dots
     var onPickCanvasBackground: (CanvasBackground) -> Void = { _ in }
@@ -28,6 +45,8 @@ struct SplitTopBar: View {
 
     private var hasPDF: Bool { totalPages > 0 }
 
+    @Namespace private var documentSwitcherNamespace
+
     var body: some View {
         GlassEffectContainer(spacing: 8) {
             HStack(spacing: 8) {
@@ -37,6 +56,25 @@ struct SplitTopBar: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: TopBarMetrics.barHeight)
+    }
+
+    /// Frame morph between the title capsule and the expanded panel is driven by
+    /// `matchedGeometryEffect`. `glassEffectID` alone does not interpolate frames —
+    /// it only manages Liquid Glass element identity for the GlassEffectContainer
+    /// union/separation merge (Apple docs / createwithswift.com). `glassEffect` is
+    /// applied independently on each branch so the glass material reshapes itself
+    /// to the current frame on every animation frame.
+    @ViewBuilder
+    private func morphedPanel(for kind: PaperDocumentKind) -> some View {
+        DocumentSwitcherPanel(
+            selectedKind: kind,
+            documents: documents,
+            activePaperID: kind == .note ? activeNotePaperID : activeCanvasPaperID,
+            onSelectDocument: onSelectDocument,
+            onCreateDocument: { onCreateDocument(kind) }
+        )
+        .glassEffect(.regular.interactive(),
+                     in: .rect(cornerRadius: Radius.xl))
     }
 
     // MARK: - Leading: library + note identity
@@ -61,11 +99,25 @@ struct SplitTopBar: View {
 
     @ViewBuilder
     private var noteIdentity: some View {
-        noteIdentityContent
-            .glassEffect(.regular.interactive(), in: .capsule)
-            .matchedTransitionSource(id: PaperDocumentKind.note,
-                                     in: documentSwitcherNamespace)
-            .layoutPriority(2)
+        Group {
+            if documentSwitcherKind == .note {
+                noteIdentityContent
+                    .opacity(0)
+                    .accessibilityHidden(true)
+                    .overlay(alignment: .topLeading) {
+                        morphedPanel(for: .note)
+                            .matchedGeometryEffect(id: DocumentSwitcherGlassID.note,
+                                                   in: documentSwitcherNamespace)
+                            .fixedSize()
+                    }
+            } else {
+                noteIdentityContent
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .matchedGeometryEffect(id: DocumentSwitcherGlassID.note,
+                                           in: documentSwitcherNamespace)
+            }
+        }
+        .layoutPriority(2)
     }
 
     @ViewBuilder
@@ -142,11 +194,25 @@ struct SplitTopBar: View {
 
     @ViewBuilder
     private var trailingCluster: some View {
-        trailingClusterContent
-            .glassEffect(.regular.interactive(), in: .capsule)
-            .matchedTransitionSource(id: PaperDocumentKind.canvas,
-                                     in: documentSwitcherNamespace)
-            .layoutPriority(2)
+        Group {
+            if documentSwitcherKind == .canvas {
+                trailingClusterContent
+                    .opacity(0)
+                    .accessibilityHidden(true)
+                    .overlay(alignment: .topTrailing) {
+                        morphedPanel(for: .canvas)
+                            .matchedGeometryEffect(id: DocumentSwitcherGlassID.canvas,
+                                                   in: documentSwitcherNamespace)
+                            .fixedSize()
+                    }
+            } else {
+                trailingClusterContent
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .matchedGeometryEffect(id: DocumentSwitcherGlassID.canvas,
+                                           in: documentSwitcherNamespace)
+            }
+        }
+        .layoutPriority(2)
     }
 
     @ViewBuilder
@@ -234,12 +300,14 @@ struct SplitTopBar: View {
     }
 }
 
-struct DocumentSwitcherPanel: View {
+private struct DocumentSwitcherPanel: View {
     let selectedKind: PaperDocumentKind
     let documents: [PaperDocument]
     let activePaperID: UUID?
     let onSelectDocument: (PaperDocument) -> Void
     let onCreateDocument: () -> Void
+
+    @State private var hasAppeared = false
 
     private var visibleDocuments: [PaperDocument] {
         documents.filter { $0.documentKind == selectedKind }
@@ -283,6 +351,13 @@ struct DocumentSwitcherPanel: View {
         }
         .frame(width: 420)
         .frame(maxHeight: 540)
+        .opacity(hasAppeared ? 1 : 0)
+        .scaleEffect(hasAppeared ? 1 : 0.97, anchor: .top)
+        .onAppear {
+            withAnimation(Motion.morphContent.delay(0.06)) {
+                hasAppeared = true
+            }
+        }
     }
 
     private var createPill: some View {
@@ -315,7 +390,7 @@ struct DocumentSwitcherPanel: View {
     }
 }
 
-struct DocumentSwitcherCard: View {
+private struct DocumentSwitcherCard: View {
     let document: PaperDocument
     let isActive: Bool
 
