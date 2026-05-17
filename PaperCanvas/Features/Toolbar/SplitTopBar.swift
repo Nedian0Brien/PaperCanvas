@@ -58,12 +58,14 @@ struct SplitTopBar: View {
         .frame(maxWidth: .infinity, minHeight: TopBarMetrics.barHeight)
     }
 
-    /// Canonical iOS 26 Liquid Glass morph: both states live inside the same
-    /// `GlassEffectContainer` and share a `glassEffectID`. The container animates
-    /// the glass material flowing between the capsule and the expanded panel
-    /// when `documentSwitcherKind` toggles under a `withAnimation` transaction.
+    /// Frame morph between the title capsule and the expanded panel is driven by
+    /// `matchedGeometryEffect`. `glassEffectID` alone does not interpolate frames —
+    /// it only manages Liquid Glass element identity for the GlassEffectContainer
+    /// union/separation merge (Apple docs / createwithswift.com). `glassEffect` is
+    /// applied independently on each branch so the glass material reshapes itself
+    /// to the current frame on every animation frame.
     @ViewBuilder
-    private func expandedPanel(for kind: PaperDocumentKind) -> some View {
+    private func morphedPanel(for kind: PaperDocumentKind) -> some View {
         DocumentSwitcherPanel(
             selectedKind: kind,
             documents: documents,
@@ -71,6 +73,8 @@ struct SplitTopBar: View {
             onSelectDocument: onSelectDocument,
             onCreateDocument: { onCreateDocument(kind) }
         )
+        .glassEffect(.regular.interactive(),
+                     in: .rect(cornerRadius: Radius.xl))
     }
 
     // MARK: - Leading: library + note identity
@@ -97,16 +101,20 @@ struct SplitTopBar: View {
     private var noteIdentity: some View {
         Group {
             if documentSwitcherKind == .note {
-                expandedPanel(for: .note)
-                    .glassEffect(.regular.interactive(),
-                                 in: .rect(cornerRadius: Radius.xl))
-                    .glassEffectID(DocumentSwitcherGlassID.note,
-                                   in: documentSwitcherNamespace)
+                noteIdentityContent
+                    .opacity(0)
+                    .accessibilityHidden(true)
+                    .overlay(alignment: .topLeading) {
+                        morphedPanel(for: .note)
+                            .matchedGeometryEffect(id: DocumentSwitcherGlassID.note,
+                                                   in: documentSwitcherNamespace)
+                            .fixedSize()
+                    }
             } else {
                 noteIdentityContent
                     .glassEffect(.regular.interactive(), in: .capsule)
-                    .glassEffectID(DocumentSwitcherGlassID.note,
-                                   in: documentSwitcherNamespace)
+                    .matchedGeometryEffect(id: DocumentSwitcherGlassID.note,
+                                           in: documentSwitcherNamespace)
             }
         }
         .layoutPriority(2)
@@ -188,16 +196,20 @@ struct SplitTopBar: View {
     private var trailingCluster: some View {
         Group {
             if documentSwitcherKind == .canvas {
-                expandedPanel(for: .canvas)
-                    .glassEffect(.regular.interactive(),
-                                 in: .rect(cornerRadius: Radius.xl))
-                    .glassEffectID(DocumentSwitcherGlassID.canvas,
-                                   in: documentSwitcherNamespace)
+                trailingClusterContent
+                    .opacity(0)
+                    .accessibilityHidden(true)
+                    .overlay(alignment: .topTrailing) {
+                        morphedPanel(for: .canvas)
+                            .matchedGeometryEffect(id: DocumentSwitcherGlassID.canvas,
+                                                   in: documentSwitcherNamespace)
+                            .fixedSize()
+                    }
             } else {
                 trailingClusterContent
                     .glassEffect(.regular.interactive(), in: .capsule)
-                    .glassEffectID(DocumentSwitcherGlassID.canvas,
-                                   in: documentSwitcherNamespace)
+                    .matchedGeometryEffect(id: DocumentSwitcherGlassID.canvas,
+                                           in: documentSwitcherNamespace)
             }
         }
         .layoutPriority(2)
