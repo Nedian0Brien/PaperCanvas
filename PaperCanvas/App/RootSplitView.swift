@@ -40,6 +40,7 @@ struct RootSplitView: View {
     @State private var textNoteDraft: CanvasTextNoteDraft?
     @State private var savedStatusResetTask: Task<Void, Never>?
     @State private var documentSwitcherKind: PaperDocumentKind?
+    @Namespace private var documentSwitcherNamespace
     @AppStorage("PaperCanvas.autoHideTopBar") private var autoHideTopBar = false
 
     private var activeNotePaper: PaperDocument? {
@@ -96,11 +97,29 @@ struct RootSplitView: View {
     var body: some View {
         ZStack {
             mainContent
-            documentSwitcherScrim
         }
         .ignoresSafeArea(.keyboard)
         .safeAreaInset(edge: .top, spacing: 0) {
             topBar
+        }
+        .sheet(item: $documentSwitcherKind) { kind in
+            DocumentSwitcherPanel(
+                selectedKind: kind,
+                documents: switchablePapers,
+                activePaperID: kind == .note ? activeNotePaperID : activeCanvasPaperID,
+                onSelectDocument: { paper in
+                    switchToPaper(paper)
+                },
+                onCreateDocument: {
+                    createDocument(of: kind)
+                }
+            )
+            .presentationDetents([.height(560)])
+            .presentationBackground(.clear)
+            .presentationDragIndicator(.hidden)
+            .presentationCompactAdaptation(.popover)
+            .navigationTransition(.zoom(sourceID: kind,
+                                        in: documentSwitcherNamespace))
         }
         .sheet(isPresented: $showingPageJumpSheet) {
             if let pdfDocument {
@@ -155,24 +174,6 @@ struct RootSplitView: View {
         guard !companion.isDeleted, companion.folder?.isDeleted != true else { return nil }
         guard companion.documentKind == kind else { return nil }
         return companion
-    }
-
-    @ViewBuilder
-    private var documentSwitcherScrim: some View {
-        if documentSwitcherKind != nil {
-            // Invisible tap target covering everything except the switcher panel
-            // itself. Tapping anywhere outside dismisses the panel — standard
-            // popover behavior. The panel lives inside the top bar's safeAreaInset
-            // overlay, which renders above this scrim, so its hit-testing wins.
-            Color.clear
-                .ignoresSafeArea()
-                .contentShape(.rect)
-                .onTapGesture {
-                    withAnimation(Motion.indirect) {
-                        documentSwitcherKind = nil
-                    }
-                }
-        }
     }
 
     @ViewBuilder
@@ -263,10 +264,7 @@ struct RootSplitView: View {
         SplitTopBar(
             noteTitle: noteDisplayTitle,
             canvasTitle: canvasDisplayTitle,
-            activeNotePaperID: activeNotePaperID,
-            activeCanvasPaperID: activeCanvasPaperID,
-            documents: switchablePapers,
-            documentSwitcherKind: documentSwitcherKind,
+            documentSwitcherNamespace: documentSwitcherNamespace,
             pageIndex: currentPageIndex,
             totalPages: pdfDocument?.pageCount ?? 0,
             canvasZoom: canvasZoomScale,
@@ -279,8 +277,6 @@ struct RootSplitView: View {
             onRecenterCanvas: { canvasResetTrigger = UUID() },
             onAddTextNote: beginAddingTextNote,
             onToggleDocumentSwitcher: toggleDocumentSwitcher,
-            onSelectDocument: switchToPaper,
-            onCreateDocument: createDocument(of:),
             canvasBackground: canvasBackground,
             onPickCanvasBackground: { type in
                 guard let canvas = activeCanvasPaper else { return }
@@ -592,12 +588,10 @@ struct RootSplitView: View {
     }
 
     private func toggleDocumentSwitcher(_ kind: PaperDocumentKind) {
-        // Spring is required so that matchedGeometryEffect interpolation between
-        // the title capsule and the expanded panel is actually visible — a 180ms
-        // easeInOut completes before the user can perceive the morph.
-        withAnimation(Motion.indirect) {
-            documentSwitcherKind = documentSwitcherKind == kind ? nil : kind
-        }
+        // The sheet+zoom presentation drives its own Liquid Glass morph from the
+        // matchedTransitionSource on the title capsule, so we just toggle state
+        // without an explicit animation transaction.
+        documentSwitcherKind = documentSwitcherKind == kind ? nil : kind
     }
 
     private func createDocument(of kind: PaperDocumentKind) {
@@ -633,7 +627,7 @@ struct RootSplitView: View {
         switch target.documentKind {
         case .note:
             guard target.id != activeNotePaperID else {
-                withAnimation(Motion.indirect) { documentSwitcherKind = nil }
+                documentSwitcherKind = nil
                 return
             }
             saveTask?.cancel()
@@ -644,13 +638,11 @@ struct RootSplitView: View {
             resetNotePane()
             target.companionPaperID = activeCanvasPaperID
             target.updatedAt = .now
-            withAnimation(Motion.indirect) {
-                activeNotePaperID = target.id
-                documentSwitcherKind = nil
-            }
+            activeNotePaperID = target.id
+            documentSwitcherKind = nil
         case .canvas:
             guard target.id != activeCanvasPaperID else {
-                withAnimation(Motion.indirect) { documentSwitcherKind = nil }
+                documentSwitcherKind = nil
                 return
             }
             saveTask?.cancel()
@@ -659,10 +651,8 @@ struct RootSplitView: View {
             resetCanvasPane()
             target.companionPaperID = activeNotePaperID
             target.updatedAt = .now
-            withAnimation(Motion.indirect) {
-                activeCanvasPaperID = target.id
-                documentSwitcherKind = nil
-            }
+            activeCanvasPaperID = target.id
+            documentSwitcherKind = nil
         }
     }
 

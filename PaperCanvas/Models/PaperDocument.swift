@@ -1,9 +1,11 @@
 import Foundation
 import SwiftData
 
-enum PaperDocumentKind: String, Codable, CaseIterable {
+enum PaperDocumentKind: String, Codable, CaseIterable, Identifiable {
     case note
     case canvas
+
+    var id: Self { self }
 
     var label: String {
         switch self {
