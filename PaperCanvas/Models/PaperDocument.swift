@@ -40,6 +40,7 @@ final class PaperDocument {
     var isPinned: Bool = false
     var pinnedAt: Date?
     var deletedAt: Date?
+    var companionPaperID: UUID?
 
     @Relationship(deleteRule: .cascade, inverse: \ScrapItem.document)
     var scrapItems: [ScrapItem] = []
@@ -71,6 +72,7 @@ final class PaperDocument {
         self.isPinned = false
         self.pinnedAt = nil
         self.deletedAt = nil
+        self.companionPaperID = nil
     }
 }
 

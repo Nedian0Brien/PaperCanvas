@@ -32,7 +32,7 @@ final class PaperThumbnailService {
 
     func generateIfNeeded(for paper: PaperDocument) async {
         let url = fileURL(for: paper)
-        if fm.fileExists(atPath: url.path) { return }
+        if isCachedThumbnailFresh(at: url, comparedTo: paper.updatedAt) { return }
         let image: UIImage?
         switch paper.documentKind {
         case .note:
@@ -42,6 +42,15 @@ final class PaperThumbnailService {
         }
         guard let png = image?.pngData() else { return }
         try? png.write(to: url, options: .atomic)
+    }
+
+    private func isCachedThumbnailFresh(at url: URL, comparedTo paperUpdatedAt: Date) -> Bool {
+        guard fm.fileExists(atPath: url.path) else { return false }
+        guard let attrs = try? fm.attributesOfItem(atPath: url.path),
+              let modDate = attrs[.modificationDate] as? Date else {
+            return false
+        }
+        return modDate >= paperUpdatedAt
     }
 
     func invalidate(for paper: PaperDocument) {
@@ -78,11 +87,20 @@ final class PaperThumbnailService {
         let strokesBounds = drawing.bounds
         let hasStrokes = !drawing.strokes.isEmpty && !strokesBounds.isNull && !strokesBounds.isInfinite
 
+        let scraps = paper.scrapItems
+        let scrapFrames: [CGRect] = scraps.map {
+            CGRect(x: $0.positionX, y: $0.positionY, width: $0.width, height: $0.height)
+        }
+        let hasScraps = !scrapFrames.isEmpty
+
+        var contentBounds: CGRect = .null
+        if hasStrokes { contentBounds = contentBounds.union(strokesBounds) }
+        for f in scrapFrames { contentBounds = contentBounds.union(f) }
+
         let sourceRect: CGRect
-        if hasStrokes {
-            sourceRect = strokesBounds.insetBy(dx: -48, dy: -48)
+        if !contentBounds.isNull && !contentBounds.isInfinite && (hasStrokes || hasScraps) {
+            sourceRect = contentBounds.insetBy(dx: -48, dy: -48)
         } else {
-            // Empty canvas: show a small placeholder area centered around origin
             sourceRect = CGRect(x: -400, y: -300, width: 800, height: 600)
         }
         let scale = maxDimension / max(sourceRect.width, sourceRect.height)
@@ -92,9 +110,52 @@ final class PaperThumbnailService {
         return renderer.image { ctx in
             UIColor.white.setFill()
             ctx.fill(CGRect(origin: .zero, size: outputSize))
+
+            let cg = ctx.cgContext
+            cg.saveGState()
+            cg.scaleBy(x: scale, y: scale)
+            cg.translateBy(x: -sourceRect.origin.x, y: -sourceRect.origin.y)
+            drawScraps(scraps, in: cg)
+            cg.restoreGState()
+
             if hasStrokes {
                 let drawingImage = drawing.image(from: sourceRect, scale: scale)
                 drawingImage.draw(in: CGRect(origin: .zero, size: outputSize))
+            }
+        }
+    }
+
+    private func drawScraps(_ scraps: [ScrapItem], in ctx: CGContext) {
+        let cornerRadius: CGFloat = 8
+        for scrap in scraps {
+            let frame = CGRect(x: scrap.positionX, y: scrap.positionY,
+                               width: scrap.width, height: scrap.height)
+            let path = UIBezierPath(roundedRect: frame, cornerRadius: cornerRadius).cgPath
+            switch scrap.kind {
+            case .text:
+                ctx.setFillColor(UIColor.systemBackground.cgColor)
+                ctx.addPath(path)
+                ctx.fillPath()
+                ctx.setStrokeColor(UIColor.systemGray4.cgColor)
+                ctx.setLineWidth(1)
+                ctx.addPath(path)
+                ctx.strokePath()
+            case .image:
+                if let data = scrap.imageData, let image = UIImage(data: data) {
+                    ctx.saveGState()
+                    ctx.addPath(path)
+                    ctx.clip()
+                    image.draw(in: frame)
+                    ctx.restoreGState()
+                } else {
+                    ctx.setFillColor(UIColor.systemGray5.cgColor)
+                    ctx.addPath(path)
+                    ctx.fillPath()
+                }
+                ctx.setStrokeColor(UIColor.systemGray4.cgColor)
+                ctx.setLineWidth(1)
+                ctx.addPath(path)
+                ctx.strokePath()
             }
         }
     }

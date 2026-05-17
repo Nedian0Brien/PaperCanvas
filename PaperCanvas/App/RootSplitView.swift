@@ -136,10 +136,25 @@ struct RootSplitView: View {
         case .note:
             activeNotePaperID = paper.id
             activeInputSurface = .note
+            if let companion = resolveCompanion(for: paper, expecting: .canvas) {
+                activeCanvasPaperID = companion.id
+            }
         case .canvas:
             activeCanvasPaperID = paper.id
             activeInputSurface = .canvas
+            if let companion = resolveCompanion(for: paper, expecting: .note) {
+                activeNotePaperID = companion.id
+            }
         }
+    }
+
+    private func resolveCompanion(for paper: PaperDocument,
+                                  expecting kind: PaperDocumentKind) -> PaperDocument? {
+        guard let companionID = paper.companionPaperID else { return nil }
+        guard let companion = libraryPapers.first(where: { $0.id == companionID }) else { return nil }
+        guard !companion.isDeleted, companion.folder?.isDeleted != true else { return nil }
+        guard companion.documentKind == kind else { return nil }
+        return companion
     }
 
     @ViewBuilder
@@ -627,6 +642,8 @@ struct RootSplitView: View {
             accessingURL?.stopAccessingSecurityScopedResource()
             accessingURL = nil
             resetNotePane()
+            target.companionPaperID = activeCanvasPaperID
+            target.updatedAt = .now
             withAnimation(Motion.indirect) {
                 activeNotePaperID = target.id
                 documentSwitcherKind = nil
@@ -640,6 +657,8 @@ struct RootSplitView: View {
             savedStatusResetTask?.cancel()
             if didLoadCanvas { persistCanvas() }
             resetCanvasPane()
+            target.companionPaperID = activeNotePaperID
+            target.updatedAt = .now
             withAnimation(Motion.indirect) {
                 activeCanvasPaperID = target.id
                 documentSwitcherKind = nil
@@ -761,6 +780,7 @@ struct RootSplitView: View {
         note.lastPageIndex = currentPageIndex
         syncPageInkModels(into: note)
         note.pdfInkData = nil
+        note.companionPaperID = activeCanvasPaperID
         note.updatedAt = .now
     }
 
@@ -769,6 +789,7 @@ struct RootSplitView: View {
         canvas.canvasOffsetX = Double(contentOffset.x)
         canvas.canvasOffsetY = Double(contentOffset.y)
         canvas.drawingData = canvasDrawing.dataRepresentation()
+        canvas.companionPaperID = activeNotePaperID
         canvas.updatedAt = .now
     }
 
