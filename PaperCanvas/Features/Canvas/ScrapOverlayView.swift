@@ -90,6 +90,28 @@ final class ScrapOverlayView: UIView,
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        attachHostingControllerIfNeeded()
+    }
+
+    /// SwiftUI views hosted via `UIHostingController` need a real
+    /// `UIViewController` parent for some Liquid Glass / environment-aware
+    /// modifiers to materialize. Walk up the responder chain on first
+    /// window attachment and adopt the nearest VC.
+    private func attachHostingControllerIfNeeded() {
+        guard window != nil, hostingController.parent == nil else { return }
+        var responder: UIResponder? = next
+        while let r = responder {
+            if let vc = r as? UIViewController {
+                vc.addChild(hostingController)
+                hostingController.didMove(toParent: vc)
+                return
+            }
+            responder = r.next
+        }
+    }
+
     func update(from scrap: ScrapItem) {
         let newBase = CGPoint(x: scrap.positionX, y: scrap.positionY)
         let newSize = CGSize(width: max(Self.minSize.width, scrap.width),
