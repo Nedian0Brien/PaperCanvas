@@ -977,9 +977,8 @@ private struct PaperCard: View {
                     .foregroundStyle(Color.Ink.secondary)
             }
         }
-        .task(id: paper.id) {
+        .task(id: "\(paper.id.uuidString)-\(paper.updatedAt.timeIntervalSinceReferenceDate)") {
             thumbnail = nil
-            guard paper.documentKind == .note else { return }
             await PaperThumbnailService.shared.generateIfNeeded(for: paper)
             thumbnail = PaperThumbnailService.shared.thumbnail(for: paper)
         }
