@@ -1019,15 +1019,8 @@ private struct PaperCard: View {
             }
         }
         .task(id: "\(paper.id.uuidString)-\(paper.updatedAt.timeIntervalSinceReferenceDate)-\(interfaceStyle.rawValue)") {
-            let schemeLabel = colorScheme == .dark ? "dark" : "light"
-            let styleLabel = interfaceStyle == .dark ? "dark" : (interfaceStyle == .light ? "light" : "unspec")
-            print("[ThumbnailDebug][PaperCard] task fired id=\(paper.id.uuidString.prefix(8)) title=\(paper.title) colorScheme=\(schemeLabel) -> style=\(styleLabel)")
             let image = PaperThumbnailService.shared.currentThumbnail(for: paper, style: interfaceStyle)
-            guard !Task.isCancelled else {
-                print("[ThumbnailDebug][PaperCard] cancelled after render id=\(paper.id.uuidString.prefix(8))")
-                return
-            }
-            print("[ThumbnailDebug][PaperCard] assigning thumbnail id=\(paper.id.uuidString.prefix(8)) image?=\(image != nil)")
+            guard !Task.isCancelled else { return }
             thumbnail = image
         }
     }
