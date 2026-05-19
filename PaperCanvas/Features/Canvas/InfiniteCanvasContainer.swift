@@ -39,7 +39,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UIView {
         let wrapper = UIView()
-        wrapper.backgroundColor = .systemBackground
+        wrapper.backgroundColor = background.uiBackgroundColor()
         wrapper.clipsToBounds = true
 
         let canvas = PKCanvasView()
@@ -48,9 +48,11 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         #else
         canvas.drawingPolicy = .pencilOnly
         #endif
-        canvas.backgroundColor = background.uiBackgroundColor()
-        canvas.isOpaque = true
-        canvas.layer.allowsGroupOpacity = false
+        // Pattern background lives on the wrapper so PencilKit can composite
+        // strokes against a transparent canvas. With an opaque pattern color,
+        // PKCanvasView's stroke tiles get hidden under the pattern at zoom < 1.
+        canvas.backgroundColor = .clear
+        canvas.isOpaque = false
         canvas.delegate = context.coordinator
         canvas.alwaysBounceVertical = true
         canvas.alwaysBounceHorizontal = true
@@ -272,7 +274,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         func syncBackground(in canvas: PKCanvasView, type: CanvasBackground) {
             guard lastAppliedBackground != type else { return }
             lastAppliedBackground = type
-            canvas.backgroundColor = type.uiBackgroundColor()
+            canvas.superview?.backgroundColor = type.uiBackgroundColor()
         }
 
         func handleResetIfNeeded(_ canvas: PKCanvasView) {

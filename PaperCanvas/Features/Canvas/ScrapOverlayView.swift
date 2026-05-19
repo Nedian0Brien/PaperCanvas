@@ -100,12 +100,15 @@ final class ScrapOverlayView: UIView,
     }
 
     func applyZoom(_ scale: CGFloat) {
+        // PKCanvasView's zoom transform already scales subviews of its internal
+        // content view, so we only track the zoom for pan-delta normalization
+        // and keep the layout in world (un-zoomed) coordinates.
         currentZoom = scale
+        transform = .identity
         bounds = CGRect(origin: .zero, size: baseSize)
-        transform = CGAffineTransform(scaleX: scale, y: scale)
         center = CGPoint(
-            x: (basePosition.x + baseSize.width / 2) * scale,
-            y: (basePosition.y + baseSize.height / 2) * scale
+            x: basePosition.x + baseSize.width / 2,
+            y: basePosition.y + baseSize.height / 2
         )
     }
 
@@ -154,9 +157,11 @@ final class ScrapOverlayView: UIView,
 
     @objc private func handlePan(_ g: UIPanGestureRecognizer) {
         guard let superview else { return }
+        // translation(in: superview) returns the delta in the superview's
+        // pre-transform coords. Since PKCanvasView's zoom is applied to the
+        // superview, this is already in world units — no /scale needed.
         let translation = g.translation(in: superview)
-        let scale = max(currentZoom, 0.0001)
-        let baseDelta = CGPoint(x: translation.x / scale, y: translation.y / scale)
+        let baseDelta = CGPoint(x: translation.x, y: translation.y)
         switch g.state {
         case .began:
             initialPanOrigin = basePosition
