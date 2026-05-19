@@ -39,7 +39,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UIView {
         let wrapper = UIView()
-        wrapper.backgroundColor = background.uiBackgroundColor()
+        wrapper.backgroundColor = .systemBackground
         wrapper.clipsToBounds = true
 
         let canvas = PKCanvasView()
@@ -48,10 +48,10 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         #else
         canvas.drawingPolicy = .pencilOnly
         #endif
-        // Pattern background lives on the wrapper so PencilKit can composite
-        // strokes against a transparent canvas. With an opaque pattern color,
-        // PKCanvasView's stroke tiles get hidden under the pattern at zoom < 1.
-        canvas.backgroundColor = .clear
+        // Pattern background stays on the canvas so it scrolls/zooms with
+        // strokes. `isOpaque = false` is essential: an opaque pattern caused
+        // PencilKit's stroke tiles to vanish at zoom < 1.
+        canvas.backgroundColor = background.uiBackgroundColor()
         canvas.isOpaque = false
         canvas.delegate = context.coordinator
         canvas.alwaysBounceVertical = true
@@ -339,7 +339,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         func syncBackground(in canvas: PKCanvasView, type: CanvasBackground) {
             guard lastAppliedBackground != type else { return }
             lastAppliedBackground = type
-            canvas.superview?.backgroundColor = type.uiBackgroundColor()
+            canvas.backgroundColor = type.uiBackgroundColor()
         }
 
         func handleResetIfNeeded(_ canvas: PKCanvasView) {
@@ -348,7 +348,15 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             let scraps = parent.scraps
             DispatchQueue.main.async { [weak canvas, weak self] in
                 guard let canvas, let self else { return }
-                canvas.setZoomScale(1.0, animated: true)
+                // Reset zoom synchronously so contentSize/bounds reflect zoom
+                // 1.0 before we measure where the content actually lives.
+                // Animating the zoom would leave contentSize at the pre-zoom
+                // scale during target computation, sending the viewport to a
+                // clamped/wrong offset.
+                if abs(canvas.zoomScale - 1.0) > 0.0001 {
+                    canvas.setZoomScale(1.0, animated: false)
+                    canvas.layoutIfNeeded()
+                }
                 let target = self.recenterTarget(in: canvas, scraps: scraps)
                 canvas.setContentOffset(target, animated: true)
                 self.parent.contentOffset = target
