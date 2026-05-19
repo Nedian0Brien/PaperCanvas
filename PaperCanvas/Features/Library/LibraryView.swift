@@ -978,9 +978,9 @@ private struct PaperCard: View {
             }
         }
         .task(id: "\(paper.id.uuidString)-\(paper.updatedAt.timeIntervalSinceReferenceDate)") {
-            thumbnail = nil
-            await PaperThumbnailService.shared.generateIfNeeded(for: paper)
-            thumbnail = PaperThumbnailService.shared.thumbnail(for: paper)
+            let image = PaperThumbnailService.shared.currentThumbnail(for: paper)
+            guard !Task.isCancelled else { return }
+            thumbnail = image
         }
     }
 }
