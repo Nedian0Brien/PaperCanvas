@@ -192,9 +192,6 @@ struct RootSplitView: View {
         case .canvas:
             activeCanvasPaperID = paper.id
             activeInputSurface = .canvas
-            if let companion = resolveCompanion(for: paper, expecting: .note) {
-                activeNotePaperID = companion.id
-            }
         }
     }
 
