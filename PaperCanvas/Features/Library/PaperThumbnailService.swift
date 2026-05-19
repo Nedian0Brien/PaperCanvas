@@ -36,9 +36,9 @@ final class PaperThumbnailService {
         let image: UIImage?
         switch paper.documentKind {
         case .note:
-            image = renderPDFThumbnail(for: paper)
+            image = renderPDFThumbnail(for: paper) ?? renderBlankPageTile()
         case .canvas:
-            image = renderCanvasThumbnail(for: paper)
+            image = renderCanvasThumbnail(for: paper) ?? renderBlankPageTile()
         }
         guard let png = image?.pngData() else { return }
         try? png.write(to: url, options: .atomic)
@@ -55,6 +55,15 @@ final class PaperThumbnailService {
 
     func invalidate(for paper: PaperDocument) {
         try? fm.removeItem(at: fileURL(for: paper))
+    }
+
+    private func renderBlankPageTile() -> UIImage {
+        let size = CGSize(width: maxDimension * 0.75, height: maxDimension)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+        }
     }
 
     private func renderPDFThumbnail(for paper: PaperDocument) -> UIImage? {
