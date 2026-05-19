@@ -30,18 +30,34 @@ final class PaperThumbnailService {
         return UIImage(data: data)
     }
 
-    func generateIfNeeded(for paper: PaperDocument) async {
+    func generateIfNeeded(for paper: PaperDocument) {
+        _ = currentThumbnail(for: paper)
+    }
+
+    /// Returns the freshest thumbnail for this paper. Reads the on-disk cache
+    /// when it is newer than the document's `updatedAt`; otherwise renders a
+    /// fresh image, persists it to disk, and returns the in-memory copy. Using
+    /// this single entry point removes the write-then-read race that previously
+    /// caused the library to fall back to the SF Symbol placeholder when the
+    /// freshly written PNG could not yet be read back.
+    func currentThumbnail(for paper: PaperDocument) -> UIImage? {
         let url = fileURL(for: paper)
-        if isCachedThumbnailFresh(at: url, comparedTo: paper.updatedAt) { return }
-        let image: UIImage?
+        if isCachedThumbnailFresh(at: url, comparedTo: paper.updatedAt),
+           let data = try? Data(contentsOf: url),
+           let cached = UIImage(data: data) {
+            return cached
+        }
+        let rendered: UIImage
         switch paper.documentKind {
         case .note:
-            image = renderPDFThumbnail(for: paper) ?? renderBlankPageTile()
+            rendered = renderPDFThumbnail(for: paper) ?? renderBlankPageTile()
         case .canvas:
-            image = renderCanvasThumbnail(for: paper) ?? renderBlankPageTile()
+            rendered = renderCanvasThumbnail(for: paper) ?? renderBlankPageTile()
         }
-        guard let png = image?.pngData() else { return }
-        try? png.write(to: url, options: .atomic)
+        if let png = rendered.pngData() {
+            try? png.write(to: url, options: .atomic)
+        }
+        return rendered
     }
 
     private func isCachedThumbnailFresh(at url: URL, comparedTo paperUpdatedAt: Date) -> Bool {

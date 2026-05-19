@@ -440,11 +440,9 @@ private struct DocumentSwitcherCard: View {
         .padding(.bottom, 4)
         .contentShape(.rect)
         .task(id: thumbnailKey) {
-            thumbnail = PaperThumbnailService.shared.thumbnail(for: document)
-            if thumbnail == nil {
-                await PaperThumbnailService.shared.generateIfNeeded(for: document)
-                thumbnail = PaperThumbnailService.shared.thumbnail(for: document)
-            }
+            let image = PaperThumbnailService.shared.currentThumbnail(for: document)
+            guard !Task.isCancelled else { return }
+            thumbnail = image
         }
     }
 }
