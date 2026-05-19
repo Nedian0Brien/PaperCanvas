@@ -920,7 +920,12 @@ struct LibraryView: View {
 
 private struct PaperCard: View {
     let paper: PaperDocument
+    @Environment(\.colorScheme) private var colorScheme
     @State private var thumbnail: UIImage?
+
+    private var interfaceStyle: UIUserInterfaceStyle {
+        colorScheme == .dark ? .dark : .light
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
@@ -977,8 +982,8 @@ private struct PaperCard: View {
                     .foregroundStyle(Color.Ink.secondary)
             }
         }
-        .task(id: "\(paper.id.uuidString)-\(paper.updatedAt.timeIntervalSinceReferenceDate)") {
-            let image = PaperThumbnailService.shared.currentThumbnail(for: paper)
+        .task(id: "\(paper.id.uuidString)-\(paper.updatedAt.timeIntervalSinceReferenceDate)-\(interfaceStyle.rawValue)") {
+            let image = PaperThumbnailService.shared.currentThumbnail(for: paper, style: interfaceStyle)
             guard !Task.isCancelled else { return }
             thumbnail = image
         }
