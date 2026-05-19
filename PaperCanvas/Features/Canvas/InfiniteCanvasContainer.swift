@@ -312,8 +312,14 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             let dx = abs(current.x - target.x)
             let dy = abs(current.y - target.y)
             guard dx > 1 || dy > 1 else { return }
-            // Only programmatic when the user isn't actively scrolling.
-            guard !canvas.isDragging, !canvas.isDecelerating else { return }
+            // Only programmatic when the user isn't actively scrolling or
+            // zooming — otherwise we'd overwrite UIScrollView's pinch-focal
+            // contentOffset adjustment with a stale value, snapping the zoom
+            // to the canvas center instead of the user's fingers.
+            guard !canvas.isDragging,
+                  !canvas.isDecelerating,
+                  !canvas.isZooming,
+                  !canvas.isZoomBouncing else { return }
             canvas.setContentOffset(target, animated: true)
             updateCameraMatrix()
         }
