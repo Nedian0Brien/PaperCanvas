@@ -23,7 +23,7 @@ final class PaperThumbnailService {
     /// Bumped whenever the rendering algorithm changes meaningfully, so old
     /// cached PNGs (which may have been written with a broken palette) are
     /// not served by the new code.
-    private static let cacheVersion = "v2"
+    private static let cacheVersion = "probe1"
 
     private func fileURL(for paper: PaperDocument, style: UIUserInterfaceStyle) -> URL {
         let suffix = style == .dark ? "-dark" : "-light"
@@ -102,20 +102,20 @@ final class PaperThumbnailService {
         let imagePlaceholder: UIColor
 
         init(style: UIUserInterfaceStyle) {
+            // TEMP DEBUG: use loud probe colors so we can visually confirm
+            // which branch ran on device. Dark -> flame red, Light -> bright
+            // blue. Revert once we know the bug.
             switch style {
             case .dark:
-                // Mirror UIColor.systemBackground / secondarySystemBackground
-                // / systemGray4 in dark mode without relying on dynamic
-                // resolution at draw time.
-                pageBackground   = UIColor(red: 0.00, green: 0.00, blue: 0.00, alpha: 1)
-                scrapFill        = UIColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1)
-                scrapStroke      = UIColor(red: 0.35, green: 0.35, blue: 0.36, alpha: 1)
-                imagePlaceholder = UIColor(red: 0.17, green: 0.17, blue: 0.18, alpha: 1)
+                pageBackground   = UIColor(red: 1.00, green: 0.00, blue: 0.25, alpha: 1) // flame red
+                scrapFill        = UIColor(red: 1.00, green: 0.40, blue: 0.55, alpha: 1)
+                scrapStroke      = UIColor(red: 1.00, green: 1.00, blue: 1.00, alpha: 1)
+                imagePlaceholder = UIColor(red: 0.80, green: 0.10, blue: 0.20, alpha: 1)
             default:
-                pageBackground   = UIColor.white
-                scrapFill        = UIColor.white
-                scrapStroke      = UIColor(red: 0.82, green: 0.82, blue: 0.84, alpha: 1)
-                imagePlaceholder = UIColor(red: 0.90, green: 0.90, blue: 0.92, alpha: 1)
+                pageBackground   = UIColor(red: 0.00, green: 0.50, blue: 1.00, alpha: 1) // bright blue
+                scrapFill        = UIColor(red: 0.40, green: 0.70, blue: 1.00, alpha: 1)
+                scrapStroke      = UIColor(red: 1.00, green: 1.00, blue: 1.00, alpha: 1)
+                imagePlaceholder = UIColor(red: 0.10, green: 0.30, blue: 0.70, alpha: 1)
             }
         }
     }
