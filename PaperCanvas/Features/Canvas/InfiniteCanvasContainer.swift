@@ -31,9 +31,6 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
     var onStrokeEnded: (() -> Void)? = nil
 
     static let defaultContentSize = CGSize(width: 4000, height: 4000)
-    static let expansionMargin: CGFloat = 600
-    static let expansionStep: CGFloat = 1500
-    static let maxContentDimension: CGFloat = 30000
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -153,8 +150,9 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
 
         DispatchQueue.main.async {
             canvas.becomeFirstResponder()
-            context.coordinator.applyInitialOffsetIfNeeded(canvas)
             context.coordinator.syncScraps(in: canvas, with: scraps)
+            context.coordinator.recomputeActiveBounds(canvas)
+            context.coordinator.applyInitialOffsetIfNeeded(canvas)
             context.coordinator.updateCameraMatrix()
         }
         return wrapper
@@ -180,6 +178,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         context.coordinator.handleResetIfNeeded(canvas)
         context.coordinator.handleUndoRedoIfNeeded(canvas)
         context.coordinator.applyExternalOffsetIfNeeded(canvas)
+        context.coordinator.recomputeActiveBounds(canvas)
     }
 
     @MainActor
@@ -495,6 +494,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             publishDrawing(canvasView.drawing)
             notifyUndoRedoState(canvasView)
             parent.onStrokeEnded?()
+            recomputeActiveBounds(canvasView)
         }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
@@ -1255,10 +1255,9 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         // MARK: - UIScrollViewDelegate
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            guard let canvas = scrollView as? PKCanvasView else { return }
+            guard scrollView is PKCanvasView else { return }
             guard !scrollView.isZooming, !scrollView.isZoomBouncing else { return }
             parent.onMainCanvasActivated?()
-            expandIfNearEdges(canvas)
             updateCameraMatrix()
             updateRectangleLassoOverlay()
             updateFreeformLassoOverlay()
@@ -1278,7 +1277,6 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
 
         func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
             guard let canvas = scrollView as? PKCanvasView else { return }
-            expandIfNearEdges(canvas)
             commitOffset(canvas)
             updateCameraMatrix()
             updateRectangleLassoOverlay()
@@ -1300,38 +1298,121 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             }
         }
 
-        private func expandIfNearEdges(_ canvas: PKCanvasView) {
-            let margin = InfiniteCanvasContainer.expansionMargin
-            let step = InfiniteCanvasContainer.expansionStep
-            let cap = InfiniteCanvasContainer.maxContentDimension
-            let offset = canvas.contentOffset
-            let size = canvas.contentSize
-            let visible = canvas.bounds.size
+        // MARK: - Tile-driven active area
 
-            var newSize = size
-            var newOffset = offset
+        /// Seed tile that keeps the canvas scrollable while there is no content.
+        /// Cleared as soon as real content appears so the active rectangle is
+        /// driven entirely by strokes and scraps thereafter.
+        private var seedTile: TileCoord?
+        /// Most recent `canvas.contentSize` we set ourselves. Used to detect
+        /// stale recomputes and skip redundant writes.
+        private var lastAppliedContentSize: CGSize?
+        private var isRecomputingActiveBounds = false
 
-            if offset.y < margin, size.height < cap {
-                newSize.height = min(cap, newSize.height + step)
-                newOffset.y += (newSize.height - size.height)
-            }
-            if offset.x < margin, size.width < cap {
-                newSize.width = min(cap, newSize.width + step)
-                newOffset.x += (newSize.width - size.width)
-            }
-            if offset.y + visible.height > size.height - margin, size.height < cap {
-                newSize.height = min(cap, newSize.height + step)
-            }
-            if offset.x + visible.width > size.width - margin, size.width < cap {
-                newSize.width = min(cap, newSize.width + step)
+        /// Recalculate the canvas's scrollable area from the content's tile
+        /// footprint. Content's tiles plus their 4-neighbors form the active
+        /// region; the canvas can only be scrolled inside that region's
+        /// bounding box. When the region would extend into negative canvas
+        /// coordinates the entire scene (strokes + scraps + scroll offset)
+        /// is translated so the active rect always starts at the origin.
+        func recomputeActiveBounds(_ canvas: PKCanvasView) {
+            guard !isRecomputingActiveBounds else { return }
+            isRecomputingActiveBounds = true
+            defer { isRecomputingActiveBounds = false }
+
+            var occupied = CanvasTileGrid.occupiedTiles(drawing: canvas.drawing,
+                                                       scraps: parent.scraps)
+            if occupied.isEmpty {
+                let seed = seedTile ?? defaultSeedTile(for: canvas)
+                seedTile = seed
+                occupied.insert(seed)
+            } else {
+                seedTile = nil
             }
 
-            if newSize != size {
-                canvas.contentSize = newSize
-                if newOffset != offset {
-                    canvas.setContentOffset(newOffset, animated: false)
+            let active = CanvasTileGrid.activeTiles(occupied: occupied)
+            guard let activeRect = CanvasTileGrid.boundingRect(of: active) else { return }
+
+            // If the active rectangle would extend into negative coordinates
+            // (content has crept toward the origin), translate every element
+            // by whole tiles so the rectangle's top-left lands back on (0, 0).
+            let shiftX = max(0, -activeRect.minX)
+            let shiftY = max(0, -activeRect.minY)
+            if shiftX > 0 || shiftY > 0 {
+                translateScene(by: CGVector(dx: shiftX, dy: shiftY), in: canvas)
+                if let seed = seedTile {
+                    let dI = Int((shiftX / CanvasTileGrid.tileSize).rounded())
+                    let dJ = Int((shiftY / CanvasTileGrid.tileSize).rounded())
+                    seedTile = TileCoord(seed.i + dI, seed.j + dJ)
                 }
             }
+
+            let finalSize = CGSize(
+                width: max(activeRect.width, activeRect.maxX + shiftX),
+                height: max(activeRect.height, activeRect.maxY + shiftY)
+            )
+            if canvas.contentSize != finalSize {
+                canvas.contentSize = finalSize
+                lastAppliedContentSize = finalSize
+                // Make sure the scroll offset is still inside the (possibly
+                // shrunken) content size — otherwise the canvas would render
+                // an out-of-bounds viewport with white margins.
+                clampContentOffset(canvas)
+            }
+        }
+
+        private func defaultSeedTile(for canvas: PKCanvasView) -> TileCoord {
+            let size = canvas.contentSize == .zero
+                ? InfiniteCanvasContainer.defaultContentSize
+                : canvas.contentSize
+            return CanvasTileGrid.tile(at: CGPoint(x: size.width / 2,
+                                                  y: size.height / 2))
+        }
+
+        private func clampContentOffset(_ canvas: PKCanvasView) {
+            let maxX = max(0, canvas.contentSize.width - canvas.bounds.width)
+            let maxY = max(0, canvas.contentSize.height - canvas.bounds.height)
+            let clamped = CGPoint(
+                x: min(maxX, max(0, canvas.contentOffset.x)),
+                y: min(maxY, max(0, canvas.contentOffset.y))
+            )
+            if clamped != canvas.contentOffset {
+                canvas.setContentOffset(clamped, animated: false)
+                parent.contentOffset = clamped
+            }
+        }
+
+        /// Translate the entire scene — drawing, scrap models, and scroll
+        /// offset — by `delta` (in canvas coordinates). Used when the active
+        /// area needs to grow toward (or past) the origin.
+        private func translateScene(by delta: CGVector, in canvas: PKCanvasView) {
+            guard abs(delta.dx) > 0.5 || abs(delta.dy) > 0.5 else { return }
+            let transform = CGAffineTransform(translationX: delta.dx, y: delta.dy)
+
+            let newDrawing = canvas.drawing.transformed(using: transform)
+            isApplyingExternalDrawing = true
+            canvas.drawing = newDrawing
+            isApplyingExternalDrawing = false
+            publishDrawing(newDrawing)
+            syncRendererFromCanvas(canvas)
+
+            for scrap in parent.scraps {
+                let newPosition = CGPoint(
+                    x: CGFloat(scrap.positionX) + delta.dx,
+                    y: CGFloat(scrap.positionY) + delta.dy
+                )
+                parent.onScrapMoved?(scrap.id, newPosition)
+            }
+
+            // contentOffset is in scaled scroll-view coordinates, so multiply
+            // the canvas-space delta by zoomScale to keep the viewport stable.
+            let zoom = canvas.zoomScale
+            let newOffset = CGPoint(
+                x: canvas.contentOffset.x + delta.dx * zoom,
+                y: canvas.contentOffset.y + delta.dy * zoom
+            )
+            canvas.setContentOffset(newOffset, animated: false)
+            parent.contentOffset = newOffset
         }
 
         // MARK: - UIDropInteraction

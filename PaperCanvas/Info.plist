@@ -44,10 +44,8 @@
 	<true/>
 	<key>UILaunchScreen</key>
 	<dict>
-		<key>UIImageName</key>
+		<key>UIColorName</key>
 		<string></string>
-		<key>UIImageRespectsSafeAreaInsets</key>
-		<true/>
 	</dict>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
