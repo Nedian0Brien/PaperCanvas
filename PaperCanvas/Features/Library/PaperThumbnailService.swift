@@ -20,9 +20,15 @@ final class PaperThumbnailService {
         return dir
     }
 
+    /// Bumped whenever the rendering algorithm changes meaningfully, so old
+    /// cached PNGs (which may have been written with a broken palette) are
+    /// not served by the new code.
+    private static let cacheVersion = "v2"
+
     private func fileURL(for paper: PaperDocument, style: UIUserInterfaceStyle) -> URL {
         let suffix = style == .dark ? "-dark" : "-light"
-        return directory.appendingPathComponent("\(paper.id.uuidString)\(suffix).png")
+        let name = "\(paper.id.uuidString)\(suffix)-\(Self.cacheVersion).png"
+        return directory.appendingPathComponent(name)
     }
 
     func thumbnail(for paper: PaperDocument, style: UIUserInterfaceStyle) -> UIImage? {
@@ -39,8 +45,12 @@ final class PaperThumbnailService {
     /// when it is newer than the document's `updatedAt`; otherwise renders a
     /// fresh image, persists it to disk, and returns the in-memory copy. The
     /// cache is keyed by interface style so light- and dark-mode tiles do not
-    /// overwrite one another, and dynamic colors (systemBackground, systemGray)
-    /// are resolved against the requested style before rasterization.
+    /// overwrite one another, and palette colors are pre-resolved to static
+    /// values before rasterization (relying on `UIColor.systemBackground`
+    /// inside the renderer block proved unreliable — the dynamic provider
+    /// would sometimes still resolve against the current screen trait
+    /// collection instead of the explicit one we passed in, yielding white
+    /// tiles in dark mode).
     func currentThumbnail(for paper: PaperDocument, style: UIUserInterfaceStyle) -> UIImage? {
         let url = fileURL(for: paper, style: style)
         if isCachedThumbnailFresh(at: url, comparedTo: paper.updatedAt),
@@ -48,20 +58,55 @@ final class PaperThumbnailService {
            let cached = UIImage(data: data) {
             return cached
         }
-        let traits = UITraitCollection(userInterfaceStyle: style)
+        // Sweep up any legacy cache files (pre-style-suffix, and pre-cache-
+        // version-bump) so we don't leak disk forever and so v1 PNGs with the
+        // broken palette never get served.
+        try? fm.removeItem(at: directory.appendingPathComponent("\(paper.id.uuidString).png"))
+        try? fm.removeItem(at: directory.appendingPathComponent("\(paper.id.uuidString)-light.png"))
+        try? fm.removeItem(at: directory.appendingPathComponent("\(paper.id.uuidString)-dark.png"))
+        let palette = ThumbnailPalette(style: style)
         let rendered: UIImage
         switch paper.documentKind {
         case .note:
-            rendered = renderPDFThumbnail(for: paper, traits: traits)
-                ?? renderBlankPageTile(traits: traits)
+            rendered = renderPDFThumbnail(for: paper, palette: palette)
+                ?? renderBlankPageTile(palette: palette)
         case .canvas:
-            rendered = renderCanvasThumbnail(for: paper, traits: traits)
-                ?? renderBlankPageTile(traits: traits)
+            rendered = renderCanvasThumbnail(for: paper, palette: palette)
+                ?? renderBlankPageTile(palette: palette)
         }
         if let png = rendered.pngData() {
             try? png.write(to: url, options: .atomic)
         }
         return rendered
+    }
+
+    /// Pre-resolved static colors that match the live canvas/note chrome in
+    /// each interface style. These are intentionally plain RGB so they
+    /// rasterize identically regardless of which trait collection is active
+    /// when `UIGraphicsImageRenderer` runs its block.
+    private struct ThumbnailPalette {
+        let pageBackground: UIColor
+        let scrapFill: UIColor
+        let scrapStroke: UIColor
+        let imagePlaceholder: UIColor
+
+        init(style: UIUserInterfaceStyle) {
+            switch style {
+            case .dark:
+                // Mirror UIColor.systemBackground / secondarySystemBackground
+                // / systemGray4 in dark mode without relying on dynamic
+                // resolution at draw time.
+                pageBackground   = UIColor(red: 0.00, green: 0.00, blue: 0.00, alpha: 1)
+                scrapFill        = UIColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1)
+                scrapStroke      = UIColor(red: 0.35, green: 0.35, blue: 0.36, alpha: 1)
+                imagePlaceholder = UIColor(red: 0.17, green: 0.17, blue: 0.18, alpha: 1)
+            default:
+                pageBackground   = UIColor.white
+                scrapFill        = UIColor.white
+                scrapStroke      = UIColor(red: 0.82, green: 0.82, blue: 0.84, alpha: 1)
+                imagePlaceholder = UIColor(red: 0.90, green: 0.90, blue: 0.92, alpha: 1)
+            }
+        }
     }
 
     private func isCachedThumbnailFresh(at url: URL, comparedTo paperUpdatedAt: Date) -> Bool {
@@ -78,17 +123,16 @@ final class PaperThumbnailService {
         try? fm.removeItem(at: fileURL(for: paper, style: .dark))
     }
 
-    private func renderBlankPageTile(traits: UITraitCollection) -> UIImage {
+    private func renderBlankPageTile(palette: ThumbnailPalette) -> UIImage {
         let size = CGSize(width: maxDimension * 0.75, height: maxDimension)
         let renderer = UIGraphicsImageRenderer(size: size)
-        let bg = UIColor.systemBackground.resolvedColor(with: traits)
         return renderer.image { ctx in
-            bg.setFill()
+            palette.pageBackground.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
         }
     }
 
-    private func renderPDFThumbnail(for paper: PaperDocument, traits: UITraitCollection) -> UIImage? {
+    private func renderPDFThumbnail(for paper: PaperDocument, palette: ThumbnailPalette) -> UIImage? {
         guard let pdfURL = resolveURL(for: paper) else { return nil }
         let didStart = pdfURL.startAccessingSecurityScopedResource()
         defer { if didStart { pdfURL.stopAccessingSecurityScopedResource() } }
@@ -98,9 +142,8 @@ final class PaperThumbnailService {
         let scale = maxDimension / max(bounds.width, bounds.height)
         let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         let renderer = UIGraphicsImageRenderer(size: size)
-        let bg = UIColor.systemBackground.resolvedColor(with: traits)
         return renderer.image { ctx in
-            bg.setFill()
+            palette.pageBackground.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
             ctx.cgContext.scaleBy(x: scale, y: scale)
             ctx.cgContext.translateBy(x: 0, y: bounds.height)
@@ -109,7 +152,7 @@ final class PaperThumbnailService {
         }
     }
 
-    private func renderCanvasThumbnail(for paper: PaperDocument, traits: UITraitCollection) -> UIImage? {
+    private func renderCanvasThumbnail(for paper: PaperDocument, palette: ThumbnailPalette) -> UIImage? {
         let drawing: PKDrawing = {
             if let data = paper.drawingData,
                let d = try? PKDrawing(data: data) { return d }
@@ -138,16 +181,15 @@ final class PaperThumbnailService {
         let outputSize = CGSize(width: sourceRect.width * scale, height: sourceRect.height * scale)
 
         let renderer = UIGraphicsImageRenderer(size: outputSize)
-        let bg = UIColor.systemBackground.resolvedColor(with: traits)
         return renderer.image { ctx in
-            bg.setFill()
+            palette.pageBackground.setFill()
             ctx.fill(CGRect(origin: .zero, size: outputSize))
 
             let cg = ctx.cgContext
             cg.saveGState()
             cg.scaleBy(x: scale, y: scale)
             cg.translateBy(x: -sourceRect.origin.x, y: -sourceRect.origin.y)
-            drawScraps(scraps, in: cg, traits: traits)
+            drawScraps(scraps, in: cg, palette: palette)
             cg.restoreGState()
 
             if hasStrokes {
@@ -157,11 +199,11 @@ final class PaperThumbnailService {
         }
     }
 
-    private func drawScraps(_ scraps: [ScrapItem], in ctx: CGContext, traits: UITraitCollection) {
+    private func drawScraps(_ scraps: [ScrapItem], in ctx: CGContext, palette: ThumbnailPalette) {
         let cornerRadius: CGFloat = 8
-        let scrapFill = UIColor.systemBackground.resolvedColor(with: traits).cgColor
-        let scrapStroke = UIColor.systemGray4.resolvedColor(with: traits).cgColor
-        let imagePlaceholder = UIColor.systemGray5.resolvedColor(with: traits).cgColor
+        let scrapFill = palette.scrapFill.cgColor
+        let scrapStroke = palette.scrapStroke.cgColor
+        let imagePlaceholder = palette.imagePlaceholder.cgColor
         for scrap in scraps {
             let frame = CGRect(x: scrap.positionX, y: scrap.positionY,
                                width: scrap.width, height: scrap.height)
