@@ -88,29 +88,38 @@ struct DesignTokensPreview: View {
                 Group {
                     Text("Glass")
                         .font(AppType.title)
-                    GlassEffectContainer(spacing: Spacing.s) {
-                        HStack(spacing: Spacing.s) {
-                            GlassChip { Text("capsule").font(AppType.caption) }
-                            GlassChip(horizontalPadding: Spacing.s, verticalPadding: Spacing.xs) {
-                                Image(systemName: "checkmark")
-                            }
-                            Text("rect r=22")
-                                .font(AppType.caption)
-                                .padding(.horizontal, Spacing.m)
-                                .padding(.vertical, Spacing.s)
-                                .chromeGlassRect()
-                            Circle()
-                                .fill(Color.Status.saved)
-                                .frame(width: 12, height: 12)
-                                .padding(Spacing.xs)
-                                .chromeGlassCircle()
-                        }
-                    }
+                    glassSamples
                 }
             }
             .padding(Spacing.l)
         }
         .background(Color.Surface.paper)
+    }
+
+    @ViewBuilder
+    private var glassSamples: some View {
+        ChromeGlassContainer(spacing: Spacing.s) {
+            glassSampleContent
+        }
+    }
+
+    private var glassSampleContent: some View {
+        HStack(spacing: Spacing.s) {
+            GlassChip { Text("capsule").font(AppType.caption) }
+            GlassChip(horizontalPadding: Spacing.s, verticalPadding: Spacing.xs) {
+                Image(systemName: "checkmark")
+            }
+            Text("rect r=22")
+                .font(AppType.caption)
+                .padding(.horizontal, Spacing.m)
+                .padding(.vertical, Spacing.s)
+                .chromeGlassRect()
+            Circle()
+                .fill(Color.Status.saved)
+                .frame(width: 12, height: 12)
+                .padding(Spacing.xs)
+                .chromeGlassCircle()
+        }
     }
 }
 

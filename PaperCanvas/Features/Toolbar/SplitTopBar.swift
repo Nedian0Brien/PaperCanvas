@@ -54,7 +54,7 @@ struct SplitTopBar: View {
     @Namespace private var documentSwitcherNamespace
 
     var body: some View {
-        GlassEffectContainer(spacing: 8) {
+        ChromeGlassContainer(spacing: 8) {
             HStack(spacing: 8) {
                 leadingCluster
                 Spacer(minLength: 0)
@@ -79,8 +79,7 @@ struct SplitTopBar: View {
             onSelectDocument: onSelectDocument,
             onCreateDocument: { onCreateDocument(kind) }
         )
-        .glassEffect(.regular.interactive(),
-                     in: .rect(cornerRadius: Radius.xl))
+        .chromeInteractiveGlassRect(cornerRadius: Radius.xl)
     }
 
     // MARK: - Leading: library + note identity
@@ -95,8 +94,7 @@ struct SplitTopBar: View {
                            height: TopBarMetrics.buttonSize)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.capsule)
+            .chromeGlassButtonStyle()
             .accessibilityLabel("라이브러리")
 
             noteIdentity
@@ -118,7 +116,7 @@ struct SplitTopBar: View {
                     }
             } else {
                 noteIdentityContent
-                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .chromeInteractiveGlassCapsule()
                     .matchedGeometryEffect(id: DocumentSwitcherGlassID.note,
                                            in: documentSwitcherNamespace)
             }
@@ -236,7 +234,7 @@ struct SplitTopBar: View {
                     }
             } else {
                 trailingClusterContent
-                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .chromeInteractiveGlassCapsule()
                     .matchedGeometryEffect(id: DocumentSwitcherGlassID.canvas,
                                            in: documentSwitcherNamespace)
             }

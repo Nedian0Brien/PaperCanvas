@@ -68,7 +68,7 @@ struct UnifiedTopBar: View {
     var body: some View {
         GeometryReader { geo in
             let density = TopBarDensity.density(forAvailableWidth: geo.size.width)
-            GlassEffectContainer(spacing: TopBarMetrics.zoneSpacing) {
+            ChromeGlassContainer(spacing: TopBarMetrics.zoneSpacing) {
                 HStack(spacing: TopBarMetrics.zoneSpacing) {
                     leadingZone(density: density)
                     toolZone(density: density)
@@ -172,8 +172,7 @@ struct UnifiedTopBar: View {
                            height: TopBarMetrics.buttonSize)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.capsule)
+            .chromeGlassButtonStyle()
             .accessibilityLabel("설정")
         }
     }

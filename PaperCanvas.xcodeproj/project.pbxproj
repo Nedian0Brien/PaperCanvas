@@ -74,7 +74,7 @@
 		329C460EEE19C17EC233A409 /* SplitTopBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitTopBar.swift; sourceTree = "<group>"; };
 		3828DE96182BDA5FBF8BFF1A /* RootSplitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootSplitView.swift; sourceTree = "<group>"; };
 		3E2E174C31B50FE18D1CC90B /* CanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasView.swift; sourceTree = "<group>"; };
-		3F8FF2A0E7EAAEADDDCF215D /* PaperCanvas.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PaperCanvas.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3F8FF2A0E7EAAEADDDCF215D /* PaperCanvas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PaperCanvas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		45D49EE585A47B4D608D4D29 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		469D5DFF3DF41DFF904D5369 /* Ink.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Ink.metal; sourceTree = "<group>"; };
 		5087DD680AB8442C22FE6B18 /* CanvasTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTransfer.swift; sourceTree = "<group>"; };
@@ -371,7 +371,6 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					AAAD6956AA04BD98CD4D523E = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -610,6 +609,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = L64524W7S7;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaperCanvas/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -630,6 +630,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = L64524W7S7;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaperCanvas/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

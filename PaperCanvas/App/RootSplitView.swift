@@ -379,7 +379,7 @@ struct RootSplitView: View {
             layout: .vertical,
             popoverArrowEdge: edge == .leading ? .leading : .trailing
         )
-        .glassEffect(.regular, in: .rect(cornerRadius: Radius.xl))
+        .chromeGlassRect(cornerRadius: Radius.xl)
         .padding(sideDockPadding(for: edge), Spacing.s)
             .opacity(chromeOpacity)
             .animation(Motion.chromeFade, value: chromeOpacity)

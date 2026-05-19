@@ -291,23 +291,7 @@ struct LibraryView: View {
 
             Section {
                 ForEach(activeFolders) { folder in
-                    sidebarLink(
-                        selection: .folder(folder.id),
-                        title: folder.name,
-                        systemImage: "folder",
-                        count: activePapers.filter { $0.folder?.id == folder.id }.count
-                    )
-                    .dropDestination(for: String.self) { items, _ in
-                        _ = movePapers(withIDs: items, to: folder)
-                    }
-                    .contextMenu {
-                        Button("이름 변경") {
-                            beginFolderRename(folder)
-                        }
-                        Button("삭제", role: .destructive) {
-                            folderPendingDeletion = folder
-                        }
-                    }
+                    folderSidebarLink(folder)
                 }
 
                 Button {
@@ -348,6 +332,36 @@ struct LibraryView: View {
                 }
             } icon: {
                 Image(systemName: systemImage)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func folderSidebarLink(_ folder: PaperFolder) -> some View {
+        if #available(iOS 26.0, *) {
+            folderSidebarLinkBase(folder)
+                .dropDestination(for: String.self) { items, _ in
+                    _ = movePapers(withIDs: items, to: folder)
+                }
+        } else {
+            folderSidebarLinkBase(folder)
+        }
+    }
+
+    @ViewBuilder
+    private func folderSidebarLinkBase(_ folder: PaperFolder) -> some View {
+        sidebarLink(
+            selection: .folder(folder.id),
+            title: folder.name,
+            systemImage: "folder",
+            count: activePapers.filter { $0.folder?.id == folder.id }.count
+        )
+        .contextMenu {
+            Button("이름 변경") {
+                beginFolderRename(folder)
+            }
+            Button("삭제", role: .destructive) {
+                folderPendingDeletion = folder
             }
         }
     }
