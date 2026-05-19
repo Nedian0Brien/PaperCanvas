@@ -52,12 +52,17 @@ final class PaperThumbnailService {
     /// collection instead of the explicit one we passed in, yielding white
     /// tiles in dark mode).
     func currentThumbnail(for paper: PaperDocument, style: UIUserInterfaceStyle) -> UIImage? {
+        let styleLabel = style == .dark ? "dark" : (style == .light ? "light" : "unspec(\(style.rawValue))")
         let url = fileURL(for: paper, style: style)
+        print("[ThumbnailDebug] currentThumbnail id=\(paper.id.uuidString.prefix(8)) kind=\(paper.documentKind) style=\(styleLabel) path=\(url.lastPathComponent)")
         if isCachedThumbnailFresh(at: url, comparedTo: paper.updatedAt),
            let data = try? Data(contentsOf: url),
            let cached = UIImage(data: data) {
+            let probe = cached.pixelColor(at: CGPoint(x: 2, y: 2))
+            print("[ThumbnailDebug]   cache HIT size=\(Int(cached.size.width))x\(Int(cached.size.height)) px(2,2)=\(probe)")
             return cached
         }
+        print("[ThumbnailDebug]   cache MISS — rendering fresh")
         // Sweep up any legacy cache files (pre-style-suffix, and pre-cache-
         // version-bump) so we don't leak disk forever and so v1 PNGs with the
         // broken palette never get served.
@@ -65,6 +70,7 @@ final class PaperThumbnailService {
         try? fm.removeItem(at: directory.appendingPathComponent("\(paper.id.uuidString)-light.png"))
         try? fm.removeItem(at: directory.appendingPathComponent("\(paper.id.uuidString)-dark.png"))
         let palette = ThumbnailPalette(style: style)
+        print("[ThumbnailDebug]   palette.pageBackground=\(palette.pageBackground.rgbaDebug) scrapFill=\(palette.scrapFill.rgbaDebug)")
         let rendered: UIImage
         switch paper.documentKind {
         case .note:
@@ -74,8 +80,13 @@ final class PaperThumbnailService {
             rendered = renderCanvasThumbnail(for: paper, palette: palette)
                 ?? renderBlankPageTile(palette: palette)
         }
+        let probe = rendered.pixelColor(at: CGPoint(x: 2, y: 2))
+        print("[ThumbnailDebug]   rendered size=\(Int(rendered.size.width))x\(Int(rendered.size.height)) px(2,2)=\(probe)")
         if let png = rendered.pngData() {
-            try? png.write(to: url, options: .atomic)
+            let writeOK = (try? png.write(to: url, options: .atomic)) != nil
+            print("[ThumbnailDebug]   wrote png=\(png.count)B ok=\(writeOK) to=\(url.lastPathComponent)")
+        } else {
+            print("[ThumbnailDebug]   pngData() returned nil")
         }
         return rendered
     }
@@ -249,5 +260,38 @@ final class PaperThumbnailService {
             if let u = URL(string: s), u.isFileURL { return u }
         }
         return nil
+    }
+}
+
+private extension UIColor {
+    var rgbaDebug: String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        if getRed(&r, green: &g, blue: &b, alpha: &a) {
+            return String(format: "rgba(%.2f,%.2f,%.2f,%.2f)", r, g, b, a)
+        }
+        return description
+    }
+}
+
+private extension UIImage {
+    /// Read a single pixel back from the rendered image. Used in debug logs to
+    /// confirm what color was actually rasterized into the PNG.
+    func pixelColor(at point: CGPoint) -> String {
+        guard let cg = cgImage,
+              let provider = cg.dataProvider,
+              let data = provider.data,
+              let bytes = CFDataGetBytePtr(data) else {
+            return "n/a"
+        }
+        let bpr = cg.bytesPerRow
+        let bpp = cg.bitsPerPixel / 8
+        let x = Int(point.x * scale)
+        let y = Int(point.y * scale)
+        guard x >= 0, y >= 0, x < cg.width, y < cg.height else { return "oob" }
+        let i = y * bpr + x * bpp
+        let r = bytes[i]
+        let g = bytes[i + 1]
+        let b = bytes[i + 2]
+        return String(format: "rgb(%d,%d,%d)", r, g, b)
     }
 }
