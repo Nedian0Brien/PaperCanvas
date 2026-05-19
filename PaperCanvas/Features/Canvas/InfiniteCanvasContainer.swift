@@ -117,15 +117,37 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         rectangleLassoPan.cancelsTouchesInView = true
         canvas.addGestureRecognizer(rectangleLassoPan)
 
+        let freeformLassoOverlay = CanvasFreeformLassoOverlayView()
+        freeformLassoOverlay.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(freeformLassoOverlay)
+        NSLayoutConstraint.activate([
+            freeformLassoOverlay.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            freeformLassoOverlay.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+            freeformLassoOverlay.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            freeformLassoOverlay.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor)
+        ])
+
+        let freeformLassoPan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleFreeformLassoPan(_:))
+        )
+        freeformLassoPan.delegate = context.coordinator
+        freeformLassoPan.cancelsTouchesInView = true
+        freeformLassoPan.maximumNumberOfTouches = 1
+        canvas.addGestureRecognizer(freeformLassoPan)
+
         context.coordinator.attach(canvas: canvas,
                                    inkMetalView: inkMetalView,
                                    rectangleLassoOverlay: rectangleLassoOverlay,
                                    rectangleLassoPan: rectangleLassoPan,
+                                   freeformLassoOverlay: freeformLassoOverlay,
+                                   freeformLassoPan: freeformLassoPan,
                                    activationTap: activationTap,
                                    activationPan: activationPan)
         context.coordinator.lastAppliedBackground = background
         context.coordinator.syncInkOverlayVisibility()
         context.coordinator.syncRectangleLassoState()
+        context.coordinator.syncFreeformLassoState()
         context.coordinator.syncRendererFromCanvas(canvas)
         context.coordinator.lastSyncedData = drawing.dataRepresentation()
 
@@ -152,6 +174,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         canvas.tool = tool
         context.coordinator.syncInkOverlayVisibility()
         context.coordinator.syncRectangleLassoState()
+        context.coordinator.syncFreeformLassoState()
         context.coordinator.syncBackground(in: canvas, type: background)
         context.coordinator.syncScraps(in: canvas, with: scraps)
         context.coordinator.handleResetIfNeeded(canvas)
@@ -169,6 +192,8 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         weak var inkMetalView: InkMetalView?
         weak var rectangleLassoOverlay: CanvasRectangleLassoOverlayView?
         weak var rectangleLassoPan: UIPanGestureRecognizer?
+        weak var freeformLassoOverlay: CanvasFreeformLassoOverlayView?
+        weak var freeformLassoPan: UIPanGestureRecognizer?
         weak var activationTap: UITapGestureRecognizer?
         weak var activationPan: UIPanGestureRecognizer?
         private var didApplyInitialOffset = false
@@ -181,8 +206,21 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         private var rectangleLassoStart: CGPoint?
         private var activeRectangleLassoRect: CGRect?
         private var selectedRectangleLassoIndices: Set<Int> = []
+        private var activeFreeformLassoPoints: [CGPoint] = []
+        private var selectedFreeformLassoIndices: Set<Int> = []
+        private var movingFreeformOriginalDrawing: PKDrawing?
+        private var movingFreeformLastPoint: CGPoint?
+        private var freeformLassoMoveStartPoint: CGPoint?
+        private var freeformLassoMoveStartTime: TimeInterval?
+        private var freeformLassoMoveDidExceedTap: Bool = false
         private var movingSelectionOriginalDrawing: PKDrawing?
         private var movingSelectionLastPoint: CGPoint?
+        private var rectLassoMoveStartPoint: CGPoint?
+        private var rectLassoMoveStartTime: TimeInterval?
+        private var rectLassoMoveDidExceedTap: Bool = false
+        private static let lassoTapMovementThreshold: CGFloat = 6
+        private static let lassoTapDurationThreshold: TimeInterval = 0.35
+        var activeColorPickerBridge: ColorPickerBridge?
 
         init(_ parent: InfiniteCanvasContainer) { self.parent = parent }
 
@@ -190,12 +228,16 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                     inkMetalView: InkMetalView,
                     rectangleLassoOverlay: CanvasRectangleLassoOverlayView,
                     rectangleLassoPan: UIPanGestureRecognizer,
+                    freeformLassoOverlay: CanvasFreeformLassoOverlayView,
+                    freeformLassoPan: UIPanGestureRecognizer,
                     activationTap: UITapGestureRecognizer,
                     activationPan: UIPanGestureRecognizer) {
             self.canvas = canvas
             self.inkMetalView = inkMetalView
             self.rectangleLassoOverlay = rectangleLassoOverlay
             self.rectangleLassoPan = rectangleLassoPan
+            self.freeformLassoOverlay = freeformLassoOverlay
+            self.freeformLassoPan = freeformLassoPan
             self.activationTap = activationTap
             self.activationPan = activationPan
         }
@@ -210,15 +252,37 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             inkMetalView?.isHidden = parent.prefersNativeToolRendering
         }
 
+        private var wasRectangleLassoActive: Bool = false
+        private var wasFreeformLassoActive: Bool = false
+
         func syncRectangleLassoState() {
             let isRectangleLasso = parent.toolKind == .lasso && parent.lassoMode == .rectangle
             rectangleLassoPan?.isEnabled = isRectangleLasso
             rectangleLassoOverlay?.isHidden = !isRectangleLasso
             if !isRectangleLasso {
+                if wasRectangleLassoActive {
+                    LassoSelectionMenu.shared.dismiss()
+                }
                 clearRectangleLassoSelection()
             } else {
                 updateRectangleLassoOverlay()
             }
+            wasRectangleLassoActive = isRectangleLasso
+        }
+
+        func syncFreeformLassoState() {
+            let isFreeformLasso = parent.toolKind == .lasso && parent.lassoMode == .freeform
+            freeformLassoPan?.isEnabled = isFreeformLasso
+            freeformLassoOverlay?.isHidden = !isFreeformLasso
+            if !isFreeformLasso {
+                if wasFreeformLassoActive {
+                    LassoSelectionMenu.shared.dismiss()
+                }
+                clearFreeformLassoSelection()
+            } else {
+                updateFreeformLassoOverlay()
+            }
+            wasFreeformLassoActive = isFreeformLasso
         }
 
         // MARK: - Camera
@@ -437,17 +501,30 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                    selectionBounds.insetBy(dx: -18, dy: -18).contains(point) {
                     movingSelectionOriginalDrawing = canvas.drawing
                     movingSelectionLastPoint = point
+                    rectLassoMoveStartPoint = point
+                    rectLassoMoveStartTime = ProcessInfo.processInfo.systemUptime
+                    rectLassoMoveDidExceedTap = false
+                    LassoSelectionMenu.shared.dismiss()
                     activeRectangleLassoRect = nil
                 } else {
+                    LassoSelectionMenu.shared.dismiss()
                     selectedRectangleLassoIndices.removeAll()
                     movingSelectionOriginalDrawing = nil
                     movingSelectionLastPoint = nil
+                    rectLassoMoveStartPoint = nil
+                    rectLassoMoveStartTime = nil
+                    rectLassoMoveDidExceedTap = false
                     rectangleLassoStart = point
                     activeRectangleLassoRect = CGRect(origin: point, size: .zero)
                 }
                 updateRectangleLassoOverlay()
             case .changed:
                 if movingSelectionOriginalDrawing != nil {
+                    if let start = rectLassoMoveStartPoint,
+                       !rectLassoMoveDidExceedTap,
+                       hypot(point.x - start.x, point.y - start.y) > Self.lassoTapMovementThreshold {
+                        rectLassoMoveDidExceedTap = true
+                    }
                     moveSelectedRectangleLassoStrokes(to: point, in: canvas)
                 } else if let start = rectangleLassoStart {
                     activeRectangleLassoRect = CGRect(
@@ -475,8 +552,11 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             if gestureRecognizer === rectangleLassoPan {
                 return parent.toolKind == .lasso && parent.lassoMode == .rectangle
             }
+            if gestureRecognizer === freeformLassoPan {
+                return parent.toolKind == .lasso && parent.lassoMode == .freeform
+            }
             if gestureRecognizer === activationPan {
-                return !(parent.toolKind == .lasso && parent.lassoMode == .rectangle)
+                return !(parent.toolKind == .lasso)
             }
             return true
         }
@@ -484,6 +564,9 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             if gestureRecognizer === rectangleLassoPan || otherGestureRecognizer === rectangleLassoPan {
+                return false
+            }
+            if gestureRecognizer === freeformLassoPan || otherGestureRecognizer === freeformLassoPan {
                 return false
             }
             return true
@@ -508,24 +591,67 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         }
 
         private func finishRectangleSelection(in canvas: PKCanvasView) {
+            let startPoint = rectangleLassoStart
+            let activeRect = activeRectangleLassoRect
             defer {
                 rectangleLassoStart = nil
                 activeRectangleLassoRect = nil
                 parent.onStrokeEnded?()
                 updateRectangleLassoOverlay()
             }
-            guard let rect = activeRectangleLassoRect,
+            guard let rect = activeRect,
                   rect.width > 4,
                   rect.height > 4 else {
                 selectedRectangleLassoIndices.removeAll()
+                if let startPoint, InkLassoClipboard.hasStrokes {
+                    let target = startPoint
+                    DispatchQueue.main.async { [weak self, weak canvas] in
+                        guard let canvas else { return }
+                        self?.presentRectanglePasteShortcut(at: target, in: canvas)
+                    }
+                }
                 return
             }
             selectedRectangleLassoIndices = selectedStrokeIndices(in: canvas, intersecting: rect)
         }
 
+        private func presentRectanglePasteShortcut(at canvasPoint: CGPoint, in canvas: PKCanvasView) {
+            LassoSelectionMenu.shared.presentPasteShortcut(in: canvas, sourcePoint: canvasPoint) { [weak self, weak canvas] in
+                guard let canvas else { return }
+                self?.pasteRectangleSelection(at: canvasPoint, in: canvas)
+            }
+        }
+
         private func finishMovingRectangleSelection(in canvas: PKCanvasView) {
+            let now = ProcessInfo.processInfo.systemUptime
+            let elapsed = (rectLassoMoveStartTime.map { now - $0 }) ?? .infinity
+            let isTap = !rectLassoMoveDidExceedTap && elapsed <= Self.lassoTapDurationThreshold
+            if isTap {
+                if let original = movingSelectionOriginalDrawing {
+                    isApplyingExternalDrawing = true
+                    canvas.drawing = original
+                    isApplyingExternalDrawing = false
+                    publishDrawing(original)
+                    syncRendererFromCanvas(canvas)
+                }
+                movingSelectionOriginalDrawing = nil
+                movingSelectionLastPoint = nil
+                rectLassoMoveStartPoint = nil
+                rectLassoMoveStartTime = nil
+                rectLassoMoveDidExceedTap = false
+                parent.onStrokeEnded?()
+                updateRectangleLassoOverlay()
+                DispatchQueue.main.async { [weak self, weak canvas] in
+                    guard let canvas else { return }
+                    self?.presentRectangleSelectionMenu(in: canvas)
+                }
+                return
+            }
             movingSelectionOriginalDrawing = nil
             movingSelectionLastPoint = nil
+            rectLassoMoveStartPoint = nil
+            rectLassoMoveStartTime = nil
+            rectLassoMoveDidExceedTap = false
             publishDrawing(canvas.drawing)
             notifyUndoRedoState(canvas)
             parent.onStrokeEnded?()
@@ -589,6 +715,483 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             return stroke.points.contains { expanded.contains($0.location) }
         }
 
+        // MARK: - Freeform lasso
+
+        @objc func handleFreeformLassoPan(_ recognizer: UIPanGestureRecognizer) {
+            guard parent.toolKind == .lasso,
+                  parent.lassoMode == .freeform,
+                  let canvas else { return }
+            let point = recognizer.location(in: canvas)
+            switch recognizer.state {
+            case .began:
+                parent.onMainCanvasActivated?()
+                parent.onStrokeBegan?()
+                if let bounds = selectedFreeformLassoBounds(in: canvas),
+                   bounds.insetBy(dx: -18, dy: -18).contains(point) {
+                    movingFreeformOriginalDrawing = canvas.drawing
+                    movingFreeformLastPoint = point
+                    freeformLassoMoveStartPoint = point
+                    freeformLassoMoveStartTime = ProcessInfo.processInfo.systemUptime
+                    freeformLassoMoveDidExceedTap = false
+                    LassoSelectionMenu.shared.dismiss()
+                    activeFreeformLassoPoints = []
+                } else {
+                    LassoSelectionMenu.shared.dismiss()
+                    selectedFreeformLassoIndices.removeAll()
+                    movingFreeformOriginalDrawing = nil
+                    movingFreeformLastPoint = nil
+                    freeformLassoMoveStartPoint = nil
+                    freeformLassoMoveStartTime = nil
+                    freeformLassoMoveDidExceedTap = false
+                    activeFreeformLassoPoints = [point]
+                }
+                updateFreeformLassoOverlay()
+            case .changed:
+                if movingFreeformOriginalDrawing != nil {
+                    if let start = freeformLassoMoveStartPoint,
+                       !freeformLassoMoveDidExceedTap,
+                       hypot(point.x - start.x, point.y - start.y) > Self.lassoTapMovementThreshold {
+                        freeformLassoMoveDidExceedTap = true
+                    }
+                    moveSelectedFreeformStrokes(to: point, in: canvas)
+                } else if let last = activeFreeformLassoPoints.last {
+                    if hypot(point.x - last.x, point.y - last.y) > 0.35 {
+                        activeFreeformLassoPoints.append(point)
+                    }
+                    updateFreeformLassoOverlay()
+                }
+            case .ended:
+                if movingFreeformOriginalDrawing != nil {
+                    finishMovingFreeformSelection(in: canvas)
+                } else {
+                    finishFreeformSelection(in: canvas)
+                }
+            case .cancelled, .failed:
+                cancelFreeformLasso(in: canvas)
+            default:
+                break
+            }
+        }
+
+        private func moveSelectedFreeformStrokes(to point: CGPoint, in canvas: PKCanvasView) {
+            guard let lastPoint = movingFreeformLastPoint,
+                  !selectedFreeformLassoIndices.isEmpty else { return }
+            let delta = CGVector(dx: point.x - lastPoint.x, dy: point.y - lastPoint.y)
+            guard abs(delta.dx) > 0.01 || abs(delta.dy) > 0.01 else { return }
+            var strokes = canvas.drawing.strokes
+            for index in selectedFreeformLassoIndices where strokes.indices.contains(index) {
+                strokes[index] = strokes[index].translatedForCanvas(by: delta)
+            }
+            isApplyingExternalDrawing = true
+            canvas.drawing = PKDrawing(strokes: strokes)
+            isApplyingExternalDrawing = false
+            publishDrawing(canvas.drawing)
+            syncRendererFromCanvas(canvas)
+            movingFreeformLastPoint = point
+            updateFreeformLassoOverlay()
+        }
+
+        private func finishFreeformSelection(in canvas: PKCanvasView) {
+            let points = activeFreeformLassoPoints
+            defer {
+                activeFreeformLassoPoints = []
+                parent.onStrokeEnded?()
+                updateFreeformLassoOverlay()
+            }
+            guard points.count >= 3 else {
+                selectedFreeformLassoIndices.removeAll()
+                if let tap = points.first, InkLassoClipboard.hasStrokes {
+                    DispatchQueue.main.async { [weak self, weak canvas] in
+                        guard let canvas else { return }
+                        self?.presentFreeformPasteShortcut(at: tap, in: canvas)
+                    }
+                }
+                return
+            }
+            selectedFreeformLassoIndices = freeformStrokeIndices(in: canvas, polygon: points)
+            if selectedFreeformLassoIndices.isEmpty,
+               let first = points.first,
+               points.allSatisfy({ hypot($0.x - first.x, $0.y - first.y) <= Self.lassoTapMovementThreshold }),
+               InkLassoClipboard.hasStrokes {
+                DispatchQueue.main.async { [weak self, weak canvas] in
+                    guard let canvas else { return }
+                    self?.presentFreeformPasteShortcut(at: first, in: canvas)
+                }
+            }
+        }
+
+        private func presentFreeformPasteShortcut(at canvasPoint: CGPoint, in canvas: PKCanvasView) {
+            LassoSelectionMenu.shared.presentPasteShortcut(in: canvas, sourcePoint: canvasPoint) { [weak self, weak canvas] in
+                guard let canvas else { return }
+                self?.pasteFreeformSelection(at: canvasPoint, in: canvas)
+            }
+        }
+
+        private func finishMovingFreeformSelection(in canvas: PKCanvasView) {
+            let now = ProcessInfo.processInfo.systemUptime
+            let elapsed = (freeformLassoMoveStartTime.map { now - $0 }) ?? .infinity
+            let isTap = !freeformLassoMoveDidExceedTap && elapsed <= Self.lassoTapDurationThreshold
+            if isTap {
+                if let original = movingFreeformOriginalDrawing {
+                    isApplyingExternalDrawing = true
+                    canvas.drawing = original
+                    isApplyingExternalDrawing = false
+                    publishDrawing(original)
+                    syncRendererFromCanvas(canvas)
+                }
+                movingFreeformOriginalDrawing = nil
+                movingFreeformLastPoint = nil
+                freeformLassoMoveStartPoint = nil
+                freeformLassoMoveStartTime = nil
+                freeformLassoMoveDidExceedTap = false
+                parent.onStrokeEnded?()
+                updateFreeformLassoOverlay()
+                DispatchQueue.main.async { [weak self, weak canvas] in
+                    guard let canvas else { return }
+                    self?.presentFreeformSelectionMenu(in: canvas)
+                }
+                return
+            }
+            movingFreeformOriginalDrawing = nil
+            movingFreeformLastPoint = nil
+            freeformLassoMoveStartPoint = nil
+            freeformLassoMoveStartTime = nil
+            freeformLassoMoveDidExceedTap = false
+            publishDrawing(canvas.drawing)
+            notifyUndoRedoState(canvas)
+            parent.onStrokeEnded?()
+            updateFreeformLassoOverlay()
+        }
+
+        private func cancelFreeformLasso(in canvas: PKCanvasView) {
+            if let original = movingFreeformOriginalDrawing {
+                isApplyingExternalDrawing = true
+                canvas.drawing = original
+                isApplyingExternalDrawing = false
+                publishDrawing(original)
+                syncRendererFromCanvas(canvas)
+            }
+            activeFreeformLassoPoints = []
+            movingFreeformOriginalDrawing = nil
+            movingFreeformLastPoint = nil
+            freeformLassoMoveStartPoint = nil
+            freeformLassoMoveStartTime = nil
+            freeformLassoMoveDidExceedTap = false
+            parent.onStrokeEnded?()
+            updateFreeformLassoOverlay()
+        }
+
+        private func clearFreeformLassoSelection() {
+            activeFreeformLassoPoints = []
+            selectedFreeformLassoIndices.removeAll()
+            movingFreeformOriginalDrawing = nil
+            movingFreeformLastPoint = nil
+            freeformLassoOverlay?.update(activeLassoPoints: nil,
+                                         selectedContentRect: nil,
+                                         in: nil)
+        }
+
+        private func updateFreeformLassoOverlay() {
+            guard let canvas else { return }
+            freeformLassoOverlay?.update(
+                activeLassoPoints: activeFreeformLassoPoints.isEmpty ? nil : activeFreeformLassoPoints,
+                selectedContentRect: selectedFreeformLassoBounds(in: canvas),
+                in: canvas
+            )
+        }
+
+        private func selectedFreeformLassoBounds(in canvas: PKCanvasView) -> CGRect? {
+            var union: CGRect?
+            for index in selectedFreeformLassoIndices where canvas.drawing.strokes.indices.contains(index) {
+                guard let inkStroke = PKDrawingConverter.convert(canvas.drawing.strokes[index]) else { continue }
+                union = union.map { $0.union(inkStroke.boundingBox) } ?? inkStroke.boundingBox
+            }
+            return union
+        }
+
+        private func freeformStrokeIndices(in canvas: PKCanvasView, polygon: [CGPoint]) -> Set<Int> {
+            guard polygon.count >= 3 else { return [] }
+            let bounds = LassoGeometry.bounds(for: polygon)
+            return Set(canvas.drawing.strokes.enumerated().compactMap { index, pkStroke in
+                guard let inkStroke = PKDrawingConverter.convert(pkStroke),
+                      inkStroke.boundingBox.intersects(bounds) else { return nil }
+                if LassoGeometry.polygonContains(CGPoint(x: inkStroke.boundingBox.midX,
+                                                          y: inkStroke.boundingBox.midY),
+                                                  polygon: polygon) {
+                    return index
+                }
+                for point in inkStroke.points {
+                    if bounds.contains(point.location),
+                       LassoGeometry.polygonContains(point.location, polygon: polygon) {
+                        return index
+                    }
+                }
+                return nil
+            })
+        }
+
+        // MARK: - Selection context menu (freeform lasso)
+
+        private func presentFreeformSelectionMenu(in canvas: PKCanvasView) {
+            guard let bounds = selectedFreeformLassoBounds(in: canvas) else { return }
+            let inset = bounds.insetBy(dx: -6, dy: -6)
+            let actions = LassoMenuActions(
+                canPaste: InkLassoClipboard.hasStrokes,
+                onCut: { [weak self, weak canvas] in
+                    guard let self, let canvas else { return }
+                    self.cutFreeformSelection(in: canvas)
+                },
+                onCopy: { [weak self, weak canvas] in
+                    guard let self, let canvas else { return }
+                    self.copyFreeformSelection(in: canvas)
+                },
+                onPaste: { [weak self, weak canvas] in
+                    guard let self, let canvas else { return }
+                    self.pasteFreeformSelection(at: nil, in: canvas)
+                },
+                onRecolor: { [weak self, weak canvas] color in
+                    guard let self, let canvas else { return }
+                    self.recolorFreeformSelection(color, in: canvas)
+                },
+                onPickCustomColor: { [weak self, weak canvas] in
+                    guard let self, let canvas else { return }
+                    self.presentFreeformCustomColorPicker(in: canvas)
+                },
+                onDelete: { [weak self, weak canvas] in
+                    guard let self, let canvas else { return }
+                    self.deleteFreeformSelection(in: canvas)
+                }
+            )
+            LassoSelectionMenu.shared.present(in: canvas, sourceRect: inset, actions: actions)
+        }
+
+        private func copyFreeformSelection(in canvas: PKCanvasView) {
+            let strokes = selectedFreeformLassoIndices.sorted().compactMap { idx -> InkStroke? in
+                guard canvas.drawing.strokes.indices.contains(idx) else { return nil }
+                return PKDrawingConverter.convert(canvas.drawing.strokes[idx])
+            }
+            InkLassoClipboard.copy(strokes)
+        }
+
+        private func cutFreeformSelection(in canvas: PKCanvasView) {
+            copyFreeformSelection(in: canvas)
+            deleteFreeformSelection(in: canvas)
+        }
+
+        private func deleteFreeformSelection(in canvas: PKCanvasView) {
+            guard !selectedFreeformLassoIndices.isEmpty else { return }
+            let before = canvas.drawing
+            var strokes = canvas.drawing.strokes
+            for index in selectedFreeformLassoIndices.sorted(by: >)
+            where strokes.indices.contains(index) {
+                strokes.remove(at: index)
+            }
+            applyDrawing(PKDrawing(strokes: strokes), before: before, in: canvas)
+            selectedFreeformLassoIndices.removeAll()
+            updateFreeformLassoOverlay()
+        }
+
+        private func recolorFreeformSelection(_ color: Color, in canvas: PKCanvasView) {
+            guard !selectedFreeformLassoIndices.isEmpty else { return }
+            let before = canvas.drawing
+            var strokes = canvas.drawing.strokes
+            let uiColor = UIColor(color)
+            for index in selectedFreeformLassoIndices where strokes.indices.contains(index) {
+                let original = strokes[index]
+                let newInk = PKInk(original.ink.inkType, color: uiColor)
+                strokes[index] = PKStroke(
+                    ink: newInk,
+                    path: original.path,
+                    transform: original.transform,
+                    mask: original.mask
+                )
+            }
+            applyDrawing(PKDrawing(strokes: strokes), before: before, in: canvas)
+            updateFreeformLassoOverlay()
+        }
+
+        func pasteFreeformSelection(at canvasPoint: CGPoint?, in canvas: PKCanvasView) {
+            guard let inkStrokes = InkLassoClipboard.paste(), !inkStrokes.isEmpty else { return }
+            let before = canvas.drawing
+            let union = inkStrokes.dropFirst().reduce(inkStrokes[0].boundingBox) { $0.union($1.boundingBox) }
+            let center = CGPoint(x: union.midX, y: union.midY)
+            let target: CGPoint
+            if let canvasPoint {
+                target = canvasPoint
+            } else if let existing = selectedFreeformLassoBounds(in: canvas) {
+                target = CGPoint(x: existing.midX + 20, y: existing.midY + 20)
+            } else {
+                target = CGPoint(
+                    x: canvas.contentOffset.x / canvas.zoomScale + canvas.bounds.midX / canvas.zoomScale,
+                    y: canvas.contentOffset.y / canvas.zoomScale + canvas.bounds.midY / canvas.zoomScale
+                )
+            }
+            let delta = CGVector(dx: target.x - center.x, dy: target.y - center.y)
+            let translated = inkStrokes.map { $0.translated(by: delta) }
+            let pasted = translated.compactMap { PKDrawingConverter.makePKStroke(from: $0) }
+            guard !pasted.isEmpty else { return }
+            let baseCount = canvas.drawing.strokes.count
+            applyDrawing(PKDrawing(strokes: canvas.drawing.strokes + pasted), before: before, in: canvas)
+            selectedFreeformLassoIndices = Set(baseCount..<(baseCount + pasted.count))
+            updateFreeformLassoOverlay()
+        }
+
+        private func presentFreeformCustomColorPicker(in canvas: PKCanvasView) {
+            guard let presenter = canvas.findTopPresenter() else { return }
+            let picker = UIColorPickerViewController()
+            picker.supportsAlpha = false
+            let bridge = ColorPickerBridge { [weak self, weak canvas] color in
+                guard let self else { return }
+                self.activeColorPickerBridge = nil
+                if let color, let canvas {
+                    self.recolorFreeformSelection(Color(color), in: canvas)
+                }
+            }
+            picker.delegate = bridge
+            activeColorPickerBridge = bridge
+            presenter.present(picker, animated: true)
+        }
+
+        // MARK: - Selection context menu (rectangle lasso)
+
+        private func presentRectangleSelectionMenu(in canvas: PKCanvasView) {
+            guard let bounds = selectedRectangleLassoBounds(in: canvas) else { return }
+            let inset = bounds.insetBy(dx: -6, dy: -6)
+            let actions = LassoMenuActions(
+                canPaste: InkLassoClipboard.hasStrokes,
+                onCut: { [weak self, weak canvas] in
+                    guard let self, let canvas else { return }
+                    self.cutRectangleSelection(in: canvas)
+                },
+                onCopy: { [weak self, weak canvas] in
+                    guard let self, let canvas else { return }
+                    self.copyRectangleSelection(in: canvas)
+                },
+                onPaste: { [weak self, weak canvas] in
+                    guard let self, let canvas else { return }
+                    self.pasteRectangleSelection(at: nil, in: canvas)
+                },
+                onRecolor: { [weak self, weak canvas] color in
+                    guard let self, let canvas else { return }
+                    self.recolorRectangleSelection(color, in: canvas)
+                },
+                onPickCustomColor: { [weak self, weak canvas] in
+                    guard let self, let canvas else { return }
+                    self.presentRectangleCustomColorPicker(in: canvas)
+                },
+                onDelete: { [weak self, weak canvas] in
+                    guard let self, let canvas else { return }
+                    self.deleteRectangleSelection(in: canvas)
+                }
+            )
+            LassoSelectionMenu.shared.present(in: canvas, sourceRect: inset, actions: actions)
+        }
+
+        private func copyRectangleSelection(in canvas: PKCanvasView) {
+            let indices = selectedRectangleLassoIndices.sorted()
+            let strokes = indices.compactMap { idx -> InkStroke? in
+                guard canvas.drawing.strokes.indices.contains(idx) else { return nil }
+                return PKDrawingConverter.convert(canvas.drawing.strokes[idx])
+            }
+            InkLassoClipboard.copy(strokes)
+        }
+
+        private func cutRectangleSelection(in canvas: PKCanvasView) {
+            copyRectangleSelection(in: canvas)
+            deleteRectangleSelection(in: canvas)
+        }
+
+        private func deleteRectangleSelection(in canvas: PKCanvasView) {
+            guard !selectedRectangleLassoIndices.isEmpty else { return }
+            let before = canvas.drawing
+            var strokes = canvas.drawing.strokes
+            for index in selectedRectangleLassoIndices.sorted(by: >)
+            where strokes.indices.contains(index) {
+                strokes.remove(at: index)
+            }
+            let after = PKDrawing(strokes: strokes)
+            applyDrawing(after, before: before, in: canvas)
+            selectedRectangleLassoIndices.removeAll()
+            updateRectangleLassoOverlay()
+        }
+
+        private func recolorRectangleSelection(_ color: Color, in canvas: PKCanvasView) {
+            guard !selectedRectangleLassoIndices.isEmpty else { return }
+            let before = canvas.drawing
+            var strokes = canvas.drawing.strokes
+            let uiColor = UIColor(color)
+            for index in selectedRectangleLassoIndices where strokes.indices.contains(index) {
+                let original = strokes[index]
+                let newInk = PKInk(original.ink.inkType, color: uiColor)
+                strokes[index] = PKStroke(
+                    ink: newInk,
+                    path: original.path,
+                    transform: original.transform,
+                    mask: original.mask
+                )
+            }
+            applyDrawing(PKDrawing(strokes: strokes), before: before, in: canvas)
+            updateRectangleLassoOverlay()
+        }
+
+        func pasteRectangleSelection(at canvasPoint: CGPoint?, in canvas: PKCanvasView) {
+            guard let inkStrokes = InkLassoClipboard.paste(), !inkStrokes.isEmpty else { return }
+            let before = canvas.drawing
+            let union = inkStrokes.dropFirst().reduce(inkStrokes[0].boundingBox) { $0.union($1.boundingBox) }
+            let center = CGPoint(x: union.midX, y: union.midY)
+            let target: CGPoint
+            if let canvasPoint {
+                target = canvasPoint
+            } else if let existing = selectedRectangleLassoBounds(in: canvas) {
+                target = CGPoint(x: existing.midX + 20, y: existing.midY + 20)
+            } else {
+                target = CGPoint(
+                    x: canvas.contentOffset.x / canvas.zoomScale + canvas.bounds.midX / canvas.zoomScale,
+                    y: canvas.contentOffset.y / canvas.zoomScale + canvas.bounds.midY / canvas.zoomScale
+                )
+            }
+            let delta = CGVector(dx: target.x - center.x, dy: target.y - center.y)
+            let translated = inkStrokes.map { $0.translated(by: delta) }
+            let pasted = translated.compactMap { PKDrawingConverter.makePKStroke(from: $0) }
+            guard !pasted.isEmpty else { return }
+            let after = PKDrawing(strokes: canvas.drawing.strokes + pasted)
+            let baseCount = canvas.drawing.strokes.count
+            applyDrawing(after, before: before, in: canvas)
+            selectedRectangleLassoIndices = Set(baseCount..<(baseCount + pasted.count))
+            updateRectangleLassoOverlay()
+        }
+
+        private func presentRectangleCustomColorPicker(in canvas: PKCanvasView) {
+            guard let presenter = canvas.findTopPresenter() else { return }
+            let picker = UIColorPickerViewController()
+            picker.supportsAlpha = false
+            let bridge = ColorPickerBridge { [weak self, weak canvas] color in
+                guard let self else { return }
+                self.activeColorPickerBridge = nil
+                if let color, let canvas {
+                    self.recolorRectangleSelection(Color(color), in: canvas)
+                }
+            }
+            picker.delegate = bridge
+            activeColorPickerBridge = bridge
+            presenter.present(picker, animated: true)
+        }
+
+        fileprivate func applyDrawing(_ drawing: PKDrawing,
+                                      before: PKDrawing,
+                                      in canvas: PKCanvasView) {
+            isApplyingExternalDrawing = true
+            canvas.drawing = drawing
+            isApplyingExternalDrawing = false
+            publishDrawing(drawing)
+            syncRendererFromCanvas(canvas)
+            canvas.undoManager?.registerUndo(withTarget: self) { [weak canvas] coord in
+                guard let canvas else { return }
+                coord.applyDrawing(before, before: drawing, in: canvas)
+            }
+            notifyUndoRedoState(canvas)
+        }
+
         func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
             Task { @MainActor [weak self] in
                 self?.parent.onPencilTap?()
@@ -612,6 +1215,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             expandIfNearEdges(canvas)
             updateCameraMatrix()
             updateRectangleLassoOverlay()
+            updateFreeformLassoOverlay()
         }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
@@ -622,6 +1226,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             }
             updateCameraMatrix()
             updateRectangleLassoOverlay()
+            updateFreeformLassoOverlay()
             parent.onZoomChanged?(scale)
         }
 
@@ -631,6 +1236,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             commitOffset(canvas)
             updateCameraMatrix()
             updateRectangleLassoOverlay()
+            updateFreeformLassoOverlay()
         }
 
         func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
@@ -820,7 +1426,102 @@ final class CanvasRectangleLassoOverlayView: UIView {
     }
 }
 
-private extension PKStroke {
+final class CanvasFreeformLassoOverlayView: UIView {
+    private var localActivePoints: [CGPoint] = []
+    private var localSelectedRect: CGRect?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not implemented")
+    }
+
+    func update(activeLassoPoints: [CGPoint]?,
+                selectedContentRect: CGRect?,
+                in canvas: PKCanvasView?) {
+        if let canvas {
+            localActivePoints = activeLassoPoints?.map { canvas.convert($0, to: self) } ?? []
+            localSelectedRect = selectedContentRect.map { canvas.convert($0.insetBy(dx: -6, dy: -6), to: self).standardized }
+        } else {
+            localActivePoints = []
+            localSelectedRect = nil
+        }
+        setNeedsDisplay()
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        if let localSelectedRect, localSelectedRect.width > 0, localSelectedRect.height > 0 {
+            context.saveGState()
+            context.setStrokeColor(UIColor.systemBlue.withAlphaComponent(0.9).cgColor)
+            context.setFillColor(UIColor.systemBlue.withAlphaComponent(0.08).cgColor)
+            context.setLineWidth(1.5)
+            context.setLineDash(phase: 0, lengths: [7, 4])
+            let path = UIBezierPath(roundedRect: localSelectedRect, cornerRadius: 8).cgPath
+            context.addPath(path)
+            context.drawPath(using: .fillStroke)
+            context.restoreGState()
+        }
+        if localActivePoints.count >= 2 {
+            context.saveGState()
+            context.setStrokeColor(UIColor.systemBlue.cgColor)
+            context.setLineWidth(1.7)
+            context.setLineDash(phase: 0, lengths: [6, 4])
+            let path = UIBezierPath()
+            path.move(to: localActivePoints[0])
+            for point in localActivePoints.dropFirst() {
+                path.addLine(to: point)
+            }
+            context.addPath(path.cgPath)
+            context.strokePath()
+            context.restoreGState()
+        }
+    }
+}
+
+enum LassoGeometry {
+    static func bounds(for points: [CGPoint]) -> CGRect {
+        guard let first = points.first else { return .zero }
+        var minX = first.x, maxX = first.x
+        var minY = first.y, maxY = first.y
+        for p in points.dropFirst() {
+            if p.x < minX { minX = p.x }
+            if p.x > maxX { maxX = p.x }
+            if p.y < minY { minY = p.y }
+            if p.y > maxY { maxY = p.y }
+        }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    static func polygonContains(_ point: CGPoint, polygon: [CGPoint]) -> Bool {
+        guard polygon.count >= 3 else { return false }
+        var isInside = false
+        var j = polygon.count - 1
+        for i in 0..<polygon.count {
+            let pi = polygon[i]
+            let pj = polygon[j]
+            if (pi.y > point.y) != (pj.y > point.y) {
+                let dy = pj.y - pi.y
+                let denominator = abs(dy) < .leastNonzeroMagnitude ? .leastNonzeroMagnitude : dy
+                let x = (pj.x - pi.x) * (point.y - pi.y) / denominator + pi.x
+                if point.x < x {
+                    isInside.toggle()
+                }
+            }
+            j = i
+        }
+        return isInside
+    }
+}
+
+extension PKStroke {
     func translatedForCanvas(by delta: CGVector) -> PKStroke {
         var copy = self
         copy.transform = copy.transform.translatedBy(x: delta.dx, y: delta.dy)
