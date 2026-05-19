@@ -345,17 +345,55 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         func handleResetIfNeeded(_ canvas: PKCanvasView) {
             guard let trigger = parent.resetTrigger, lastResetTrigger != trigger else { return }
             lastResetTrigger = trigger
+            let scraps = parent.scraps
             DispatchQueue.main.async { [weak canvas, weak self] in
-                guard let canvas else { return }
+                guard let canvas, let self else { return }
                 canvas.setZoomScale(1.0, animated: true)
-                let cx = (canvas.contentSize.width - canvas.bounds.width) / 2
-                let cy = (canvas.contentSize.height - canvas.bounds.height) / 2
-                let target = CGPoint(x: max(0, cx), y: max(0, cy))
+                let target = self.recenterTarget(in: canvas, scraps: scraps)
                 canvas.setContentOffset(target, animated: true)
-                self?.parent.contentOffset = target
-                self?.updateCameraMatrix()
-                self?.parent.onZoomChanged?(1.0)
+                self.parent.contentOffset = target
+                self.updateCameraMatrix()
+                self.parent.onZoomChanged?(1.0)
             }
+        }
+
+        /// Compute the content offset that centers the viewport on the user's
+        /// existing content (strokes + scraps). Falls back to the geometric
+        /// center of contentSize when the canvas is empty.
+        private func recenterTarget(in canvas: PKCanvasView, scraps: [ScrapItem]) -> CGPoint {
+            let viewport = canvas.bounds.size
+            let contentSize = canvas.contentSize
+
+            var contentBounds: CGRect = .null
+            let drawingBounds = canvas.drawing.bounds
+            if drawingBounds.width > 0 || drawingBounds.height > 0 {
+                contentBounds = drawingBounds
+            }
+            for scrap in scraps {
+                let rect = CGRect(
+                    x: CGFloat(scrap.positionX),
+                    y: CGFloat(scrap.positionY),
+                    width: max(1, CGFloat(scrap.width)),
+                    height: max(1, CGFloat(scrap.height))
+                )
+                contentBounds = contentBounds.isNull ? rect : contentBounds.union(rect)
+            }
+
+            let center: CGPoint
+            if contentBounds.isNull {
+                center = CGPoint(x: contentSize.width / 2, y: contentSize.height / 2)
+            } else {
+                center = CGPoint(x: contentBounds.midX, y: contentBounds.midY)
+            }
+
+            let rawX = center.x - viewport.width / 2
+            let rawY = center.y - viewport.height / 2
+            let maxX = max(0, contentSize.width - viewport.width)
+            let maxY = max(0, contentSize.height - viewport.height)
+            return CGPoint(
+                x: min(maxX, max(0, rawX)),
+                y: min(maxY, max(0, rawY))
+            )
         }
 
         func handleUndoRedoIfNeeded(_ canvas: PKCanvasView) {
