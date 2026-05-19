@@ -173,6 +173,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         weak var activationPan: UIPanGestureRecognizer?
         private var didApplyInitialOffset = false
         private var scrapViews: [UUID: ScrapOverlayView] = [:]
+        private var selectedScrapID: UUID?
         private var lastResetTrigger: UUID?
         private var lastUndoTrigger: UUID?
         private var lastRedoTrigger: UUID?
@@ -332,6 +333,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                 } else {
                     let view = ScrapOverlayView(scrap: scrap)
                     view.onTap = { [weak self] id in
+                        self?.handleScrapSelection(id)
                         self?.parent.onScrapTap?(id)
                     }
                     view.onPositionChanged = { [weak self] id, position in
@@ -344,6 +346,9 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                         self?.parent.onScrapEditRequested?(id)
                     }
                     view.onDeleteRequested = { [weak self] id in
+                        if self?.selectedScrapID == id {
+                            self?.selectedScrapID = nil
+                        }
                         self?.parent.onScrapDeleted?(id)
                     }
                     canvas.addSubview(view)
@@ -351,6 +356,18 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                     scrapViews[scrap.id] = view
                 }
             }
+        }
+
+        /// Keep at most one scrap selected at a time; tapping the already-selected
+        /// scrap toggles it off (the tapped view has already flipped its own
+        /// `visualState`, so we just have to clear the previous selection).
+        func handleScrapSelection(_ tappedID: UUID) {
+            let tappedView = scrapViews[tappedID]
+            let isNowSelected = tappedView?.visualState == .selected
+            if let previousID = selectedScrapID, previousID != tappedID {
+                scrapViews[previousID]?.visualState = .normal
+            }
+            selectedScrapID = isNowSelected ? tappedID : nil
         }
 
         // MARK: - PKCanvasViewDelegate

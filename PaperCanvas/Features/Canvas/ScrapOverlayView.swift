@@ -1,10 +1,12 @@
 import UIKit
+import SwiftUI
 
 final class ScrapOverlayView: UIView,
                               UIGestureRecognizerDelegate,
                               UIContextMenuInteractionDelegate {
     let scrapID: UUID
     let kind: ScrapKind
+    let anchorKind: PDFAnchorKind?
 
     var onTap: ((UUID) -> Void)?
     var onPositionChanged: ((UUID, CGPoint) -> Void)?
@@ -16,65 +18,72 @@ final class ScrapOverlayView: UIView,
     private(set) var baseSize: CGSize
     private(set) var currentZoom: CGFloat = 1.0
 
-    private weak var label: UILabel?
-    private weak var imageView: UIImageView?
+    private var text: String?
+    private var image: UIImage?
+    private var documentTitle: String?
+    private var pageIndex: Int
+
+    var visualState: ScrapVisualState = .normal {
+        didSet {
+            guard oldValue != visualState else { return }
+            refreshContent()
+        }
+    }
+
+    private let hostingController: UIHostingController<ScrapCardContent>
     private var initialPanOrigin: CGPoint = .zero
     private var initialPinchSize: CGSize = .zero
+    private var stateBeforeGesture: ScrapVisualState = .normal
+    private var editingFlashWorkItem: DispatchWorkItem?
 
     private static let fingerOnly: [NSNumber] = [
         NSNumber(value: UITouch.TouchType.direct.rawValue)
     ]
-    private static let minSize = CGSize(width: 60, height: 40)
+    private static let minSize = CGSize(width: 120, height: 64)
     private static let maxSize = CGSize(width: 2000, height: 2000)
 
     init(scrap: ScrapItem) {
         self.scrapID = scrap.id
         self.kind = scrap.kind
+        self.anchorKind = scrap.anchorKind
         let pos = CGPoint(x: scrap.positionX, y: scrap.positionY)
-        let size = CGSize(width: max(40, scrap.width), height: max(40, scrap.height))
+        let size = CGSize(width: max(Self.minSize.width, scrap.width),
+                          height: max(Self.minSize.height, scrap.height))
         self.basePosition = pos
         self.baseSize = size
+        self.text = scrap.text
+        self.image = scrap.imageData.flatMap { UIImage(data: $0) }
+        self.documentTitle = scrap.document?.title
+        self.pageIndex = scrap.sourcePageIndex
+
+        let rootView = ScrapCardContent(
+            kind: scrap.kind,
+            anchorKind: scrap.anchorKind,
+            text: scrap.text,
+            image: self.image,
+            documentTitle: self.documentTitle,
+            pageIndex: scrap.sourcePageIndex,
+            state: .normal,
+            zoom: 1.0
+        )
+        self.hostingController = UIHostingController(rootView: rootView)
+
         super.init(frame: CGRect(origin: pos, size: size))
 
-        backgroundColor = (scrap.kind == .text) ? .systemBackground : .clear
-        layer.cornerRadius = 8
-        layer.borderColor = UIColor.systemGray4.cgColor
-        layer.borderWidth = 1
-        layer.masksToBounds = true
-        layer.allowsGroupOpacity = false
+        backgroundColor = .clear
+        layer.masksToBounds = false
 
-        switch scrap.kind {
-        case .text:
-            let l = UILabel()
-            l.numberOfLines = 0
-            l.text = scrap.text
-            l.font = .preferredFont(forTextStyle: .body)
-            l.textColor = .label
-            l.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(l)
-            NSLayoutConstraint.activate([
-                l.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-                l.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-                l.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-                l.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10)
-            ])
-            label = l
-        case .image:
-            let iv = UIImageView()
-            iv.contentMode = .scaleAspectFit
-            iv.translatesAutoresizingMaskIntoConstraints = false
-            if let data = scrap.imageData, let img = UIImage(data: data) {
-                iv.image = img
-            }
-            addSubview(iv)
-            NSLayoutConstraint.activate([
-                iv.topAnchor.constraint(equalTo: topAnchor),
-                iv.leadingAnchor.constraint(equalTo: leadingAnchor),
-                iv.trailingAnchor.constraint(equalTo: trailingAnchor),
-                iv.bottomAnchor.constraint(equalTo: bottomAnchor)
-            ])
-            imageView = iv
-        }
+        let hostView = hostingController.view!
+        hostView.backgroundColor = .clear
+        hostView.isUserInteractionEnabled = false
+        hostView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hostView)
+        NSLayoutConstraint.activate([
+            hostView.topAnchor.constraint(equalTo: topAnchor),
+            hostView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            hostView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hostView.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
 
         installGestures()
     }
@@ -83,19 +92,35 @@ final class ScrapOverlayView: UIView,
 
     func update(from scrap: ScrapItem) {
         let newBase = CGPoint(x: scrap.positionX, y: scrap.positionY)
-        let newSize = CGSize(width: max(40, scrap.width), height: max(40, scrap.height))
+        let newSize = CGSize(width: max(Self.minSize.width, scrap.width),
+                             height: max(Self.minSize.height, scrap.height))
         if basePosition != newBase || baseSize != newSize {
             basePosition = newBase
             baseSize = newSize
             applyZoom(currentZoom)
         }
-        switch kind {
-        case .text:
-            if label?.text != scrap.text { label?.text = scrap.text }
-        case .image:
-            if let data = scrap.imageData, let img = UIImage(data: data) {
-                imageView?.image = img
-            }
+
+        var contentChanged = false
+        if text != scrap.text {
+            text = scrap.text
+            contentChanged = true
+        }
+        let newImage = scrap.imageData.flatMap { UIImage(data: $0) }
+        if image !== newImage {
+            image = newImage
+            contentChanged = true
+        }
+        let newTitle = scrap.document?.title
+        if documentTitle != newTitle {
+            documentTitle = newTitle
+            contentChanged = true
+        }
+        if pageIndex != scrap.sourcePageIndex {
+            pageIndex = scrap.sourcePageIndex
+            contentChanged = true
+        }
+        if contentChanged {
+            refreshContent()
         }
     }
 
@@ -109,6 +134,35 @@ final class ScrapOverlayView: UIView,
         center = CGPoint(
             x: basePosition.x + baseSize.width / 2,
             y: basePosition.y + baseSize.height / 2
+        )
+        refreshContent()
+    }
+
+    /// Briefly show an editing dashed border, then return to normal/selected.
+    func flashEditingState() {
+        editingFlashWorkItem?.cancel()
+        let previous: ScrapVisualState = (visualState == .selected) ? .selected : .normal
+        visualState = .editing
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.visualState == .editing {
+                self.visualState = previous
+            }
+        }
+        editingFlashWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
+    }
+
+    private func refreshContent() {
+        hostingController.rootView = ScrapCardContent(
+            kind: kind,
+            anchorKind: anchorKind,
+            text: text,
+            image: image,
+            documentTitle: documentTitle,
+            pageIndex: pageIndex,
+            state: visualState,
+            zoom: currentZoom
         )
     }
 
@@ -148,10 +202,12 @@ final class ScrapOverlayView: UIView,
     }
 
     @objc private func handleTap() {
+        visualState = (visualState == .selected) ? .normal : .selected
         onTap?(scrapID)
     }
 
     @objc private func handleEdit() {
+        flashEditingState()
         onEditRequested?(scrapID)
     }
 
@@ -165,6 +221,8 @@ final class ScrapOverlayView: UIView,
         switch g.state {
         case .began:
             initialPanOrigin = basePosition
+            stateBeforeGesture = visualState
+            visualState = .dragging
         case .changed:
             basePosition = CGPoint(
                 x: initialPanOrigin.x + baseDelta.x,
@@ -177,10 +235,12 @@ final class ScrapOverlayView: UIView,
                 y: initialPanOrigin.y + baseDelta.y
             )
             applyZoom(currentZoom)
+            visualState = .selected
             onPositionChanged?(scrapID, basePosition)
         case .cancelled, .failed:
             basePosition = initialPanOrigin
             applyZoom(currentZoom)
+            visualState = stateBeforeGesture
         default:
             break
         }
@@ -190,6 +250,8 @@ final class ScrapOverlayView: UIView,
         switch g.state {
         case .began:
             initialPinchSize = baseSize
+            stateBeforeGesture = visualState
+            visualState = .dragging
         case .changed:
             let scale = g.scale
             let newW = clamp(initialPinchSize.width * scale,
@@ -201,7 +263,10 @@ final class ScrapOverlayView: UIView,
             baseSize = CGSize(width: newW, height: newH)
             applyZoom(currentZoom)
         case .ended:
+            visualState = .selected
             onSizeChanged?(scrapID, baseSize)
+        case .cancelled, .failed:
+            visualState = stateBeforeGesture
         default:
             break
         }
@@ -219,6 +284,7 @@ final class ScrapOverlayView: UIView,
             if self.kind == .text {
                 actions.append(UIAction(title: "편집",
                                         image: UIImage(systemName: "square.and.pencil")) { _ in
+                    self.flashEditingState()
                     self.onEditRequested?(self.scrapID)
                 })
             }
