@@ -35,6 +35,10 @@ final class PaperDocument {
     var drawingData: Data?
     var pdfInkData: Data?
     var canvasBackgroundRaw: String = "dots"
+    var notePageStyleRaw: String = "lined"
+    var notePageCount: Int = 1
+    var notePageWidth: Double = 1024
+    var notePageHeight: Double = 1325
     var createdAt: Date
     var updatedAt: Date
     var isPinned: Bool = false
@@ -59,7 +63,9 @@ final class PaperDocument {
     init(title: String,
          kind: PaperDocumentKind = .note,
          bookmarkData: Data? = nil,
-         sourceURLString: String? = nil) {
+         sourceURLString: String? = nil,
+         notePageStyle: NotePageStyle = .lined,
+         notePageCount: Int = 1) {
         self.id = UUID()
         self.title = title
         self.documentKindRawValue = kind.rawValue
@@ -73,6 +79,10 @@ final class PaperDocument {
         self.drawingData = nil
         self.pdfInkData = nil
         self.canvasBackgroundRaw = "dots"
+        self.notePageStyleRaw = notePageStyle.rawValue
+        self.notePageCount = max(1, notePageCount)
+        self.notePageWidth = Double(NotePageStyle.defaultPageSize.width)
+        self.notePageHeight = Double(NotePageStyle.defaultPageSize.height)
         self.createdAt = .now
         self.updatedAt = .now
         self.isPinned = false
@@ -102,5 +112,19 @@ extension PaperDocument {
 
     var isDeleted: Bool {
         deletedAt != nil
+    }
+
+    var notePageStyle: NotePageStyle {
+        get { NotePageStyle(rawValue: notePageStyleRaw) ?? .lined }
+        set { notePageStyleRaw = newValue.rawValue }
+    }
+
+    var hasPDFSource: Bool {
+        bookmarkData != nil || !(sourceURLString?.isEmpty ?? true)
+    }
+
+    /// True for blank, page-based notes (no PDF backing).
+    var isBlankPagedNote: Bool {
+        documentKind == .note && !hasPDFSource
     }
 }

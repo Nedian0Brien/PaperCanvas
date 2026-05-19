@@ -369,11 +369,12 @@ struct LibraryView: View {
         ContentUnavailableView {
             Label("문서가 없습니다", systemImage: "note.text")
         } description: {
-            Text("빈 캔버스를 만들거나 PDF를 가져오세요.")
+            Text("새 노트를 만들거나 PDF를 가져오세요.")
         } actions: {
             HStack(spacing: Spacing.m) {
-                Button(action: createBlankNote) {
-                    Label("새 캔버스", systemImage: "square.and.pencil")
+                newNoteMenu(label: "새 노트", systemImage: "doc.text")
+                Button(action: createBlankCanvas) {
+                    Label("새 캔버스", systemImage: "rectangle.on.rectangle")
                 }
                 Button {
                     showingFilePicker = true
@@ -397,8 +398,12 @@ struct LibraryView: View {
             Text(emptyStateDescription)
         } actions: {
             if case .folder = selectedScope {
-                Button(action: createBlankNote) {
-                    Label("이 폴더에 새 캔버스", systemImage: "square.and.pencil")
+                HStack(spacing: Spacing.m) {
+                    newNoteMenu(label: "이 폴더에 새 노트",
+                                systemImage: "doc.text")
+                    Button(action: createBlankCanvas) {
+                        Label("이 폴더에 새 캔버스", systemImage: "rectangle.on.rectangle")
+                    }
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -597,8 +602,10 @@ struct LibraryView: View {
                     Label("정렬", systemImage: "arrow.up.arrow.down")
                 }
 
-                Button(action: createBlankNote) {
-                    Label("새 캔버스", systemImage: "square.and.pencil")
+                newNoteMenu(label: "새 노트", systemImage: "doc.text")
+
+                Button(action: createBlankCanvas) {
+                    Label("새 캔버스", systemImage: "rectangle.on.rectangle")
                 }
 
                 Button {
@@ -614,6 +621,22 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func newNoteMenu(label: String, systemImage: String) -> some View {
+        Menu {
+            ForEach(NotePageStyle.allCases) { style in
+                Button {
+                    createBlankNote(style: style)
+                } label: {
+                    Label(style.label, systemImage: style.systemImage)
+                }
+            }
+        } label: {
+            Label(label, systemImage: systemImage)
+        }
+        .accessibilityLabel(label)
     }
 
     private var paperRenamePresented: Binding<Bool> {
@@ -690,8 +713,8 @@ struct LibraryView: View {
         return activeFolders.first { $0.id == folderID }
     }
 
-    private func createBlankNote() {
-        let paper = PaperDocument(title: nextBlankNoteTitle(), kind: .canvas)
+    private func createBlankCanvas() {
+        let paper = PaperDocument(title: nextBlankTitle(base: "새 캔버스"), kind: .canvas)
         if let folder = selectedFolder() {
             paper.folder = folder
             folder.updatedAt = .now
@@ -701,8 +724,21 @@ struct LibraryView: View {
         selectedPaper = paper
     }
 
-    private func nextBlankNoteTitle() -> String {
-        let base = "새 캔버스"
+    private func createBlankNote(style: NotePageStyle) {
+        let paper = PaperDocument(title: nextBlankTitle(base: "새 노트"),
+                                  kind: .note,
+                                  notePageStyle: style,
+                                  notePageCount: 1)
+        if let folder = selectedFolder() {
+            paper.folder = folder
+            folder.updatedAt = .now
+        }
+        modelContext.insert(paper)
+        try? modelContext.save()
+        selectedPaper = paper
+    }
+
+    private func nextBlankTitle(base: String) -> String {
         let existingTitles = Set(papers.map(\.title))
         guard existingTitles.contains(base) else { return base }
 

@@ -19,6 +19,7 @@ struct RootSplitView: View {
     @State private var activeCanvasPaperID: UUID?
     @State private var pdfDocument: PDFDocument?
     @State private var canvasDrawing = PKDrawing()
+    @State private var blankNoteDrawing = PKDrawing()
     @State private var pdfInkStrokes: [Int: [InkStroke]] = [:]
     @State private var contentOffset: CGPoint = .zero
     @State private var currentPageIndex: Int = 0
@@ -93,8 +94,20 @@ struct RootSplitView: View {
     }
 
     private var hasPDFSource: Bool {
-        guard let note = activeNotePaper else { return false }
-        return note.bookmarkData != nil || !(note.sourceURLString?.isEmpty ?? true)
+        activeNotePaper?.hasPDFSource ?? false
+    }
+
+    /// True when the note pane should show the blank, page-based editor
+    /// (PaperDocument of kind .note without a backing PDF).
+    private var isBlankPagedNote: Bool {
+        activeNotePaper?.isBlankPagedNote ?? false
+    }
+
+    /// True when the note pane has any content to render in the left split.
+    /// We mirror the PDF-pane visibility for the divider so blank notes also
+    /// get the split layout.
+    private var hasLeftPaneContent: Bool {
+        hasPDFSource || isBlankPagedNote
     }
 
     var body: some View {
@@ -174,6 +187,7 @@ struct RootSplitView: View {
         .task(id: activeNotePaperID) { await loadNoteIfNeeded() }
         .task(id: activeCanvasPaperID) { await loadCanvasIfNeeded() }
         .onChange(of: canvasDrawing) { _, _ in scheduleSave() }
+        .onChange(of: blankNoteDrawing) { _, _ in scheduleSave() }
         .onChange(of: pdfInkStrokes) { _, _ in scheduleSave() }
         .onChange(of: contentOffset) { _, _ in scheduleSave() }
         .onChange(of: currentPageIndex) { _, _ in scheduleSave() }
@@ -230,10 +244,10 @@ struct RootSplitView: View {
                                 min(totalWidth * maxFraction,
                                     totalWidth * leftFraction))
             let rightWidth = max(0, totalWidth - leftWidth - dividerVisualWidth)
-            let canvasWidth = hasPDFSource ? max(0, rightWidth - (dividerHitWidth - dividerVisualWidth)) : totalWidth
+            let canvasWidth = hasLeftPaneContent ? max(0, rightWidth - (dividerHitWidth - dividerVisualWidth)) : totalWidth
 
             HStack(spacing: 0) {
-                if hasPDFSource {
+                if hasLeftPaneContent {
                     ZStack(alignment: .leading) {
                         leftPane
                         sideDock(palette: palettePDF, edge: .leading)
@@ -335,6 +349,11 @@ struct RootSplitView: View {
                 canvas.updatedAt = .now
                 scheduleSave()
             },
+            isBlankPagedNote: isBlankPagedNote,
+            notePageStyle: activeNotePaper?.notePageStyle ?? .lined,
+            notePageCount: max(1, activeNotePaper?.notePageCount ?? 1),
+            onAddNotePage: addBlankNotePage,
+            onPickNotePageStyle: setBlankNotePageStyle,
             debugActions: debugActions
         )
         .padding(.horizontal, TopBarMetrics.outerHorizontalPadding)
@@ -373,7 +392,28 @@ struct RootSplitView: View {
 
     @ViewBuilder
     private var leftPane: some View {
-        if let pdfDocument {
+        if isBlankPagedNote, let note = activeNotePaper {
+            PageNoteView(
+                drawing: $blankNoteDrawing,
+                pageStyle: note.notePageStyle,
+                pageCount: max(1, note.notePageCount),
+                pageSize: CGSize(width: note.notePageWidth,
+                                 height: note.notePageHeight),
+                palette: palettePDF,
+                onPageNoteActivated: {
+                    activeInputSurface = .note
+                },
+                onStrokeBegan: {
+                    activeInputSurface = .note
+                    palettePDF.isStrokeInProgress = true
+                },
+                onStrokeEnded: {
+                    palettePDF.isStrokeInProgress = false
+                },
+                onPencilTap: handlePencilTap,
+                onAddPageRequested: addBlankNotePage
+            )
+        } else if let pdfDocument {
             PDFKitView(document: pdfDocument,
                        currentPageIndex: $currentPageIndex,
                        navigationTarget: $navigationTarget,
@@ -928,6 +968,7 @@ struct RootSplitView: View {
     private func resetNotePane() {
         pdfDocument = nil
         pdfInkStrokes = [:]
+        blankNoteDrawing = PKDrawing()
         currentPageIndex = 0
         navigationTarget = nil
         loadError = nil
@@ -957,6 +998,14 @@ struct RootSplitView: View {
         guard hasPDFSource else {
             pdfDocument = nil
             loadError = nil
+            // Blank, page-based note — restore the persisted PencilKit drawing.
+            if let data = note.drawingData,
+               !data.isEmpty,
+               let restored = try? PKDrawing(data: data) {
+                blankNoteDrawing = restored
+            } else {
+                blankNoteDrawing = PKDrawing()
+            }
             return
         }
 
@@ -1040,6 +1089,9 @@ struct RootSplitView: View {
         syncPageInkModels(into: note)
         note.pdfInkData = nil
         note.companionPaperID = activeCanvasPaperID
+        if note.isBlankPagedNote {
+            note.drawingData = blankNoteDrawing.dataRepresentation()
+        }
         note.updatedAt = .now
     }
 
@@ -1104,6 +1156,20 @@ struct RootSplitView: View {
                 modelContext.insert(ink)
             }
         }
+    }
+
+    private func addBlankNotePage() {
+        guard let note = activeNotePaper, note.isBlankPagedNote else { return }
+        note.notePageCount = max(1, note.notePageCount) + 1
+        note.updatedAt = .now
+        scheduleSave()
+    }
+
+    private func setBlankNotePageStyle(_ style: NotePageStyle) {
+        guard let note = activeNotePaper, note.isBlankPagedNote else { return }
+        note.notePageStyle = style
+        note.updatedAt = .now
+        scheduleSave()
     }
 
     private func handleDisappear() {

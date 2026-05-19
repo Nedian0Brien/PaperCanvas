@@ -36,6 +36,12 @@ struct SplitTopBar: View {
     var canvasBackground: CanvasBackground = .dots
     var onPickCanvasBackground: (CanvasBackground) -> Void = { _ in }
 
+    var isBlankPagedNote: Bool = false
+    var notePageStyle: NotePageStyle = .lined
+    var notePageCount: Int = 1
+    var onAddNotePage: () -> Void = {}
+    var onPickNotePageStyle: (NotePageStyle) -> Void = { _ in }
+
     var debugActions: DebugActions?
 
     struct DebugActions {
@@ -166,8 +172,31 @@ struct SplitTopBar: View {
             divider
 
             Menu {
-                Section("PDF") {
-                    Button("페이지 점프...", action: onPageJumpTap).disabled(!hasPDF)
+                if isBlankPagedNote {
+                    Section("노트") {
+                        Button(action: onAddNotePage) {
+                            Label("페이지 추가 (현재 \(notePageCount))",
+                                  systemImage: "plus.rectangle.on.rectangle")
+                        }
+                        Menu {
+                            ForEach(NotePageStyle.allCases) { style in
+                                Button {
+                                    onPickNotePageStyle(style)
+                                } label: {
+                                    Label(style.label, systemImage: style.systemImage)
+                                    if notePageStyle == style {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label("페이지 스타일", systemImage: notePageStyle.systemImage)
+                        }
+                    }
+                } else {
+                    Section("PDF") {
+                        Button("페이지 점프...", action: onPageJumpTap).disabled(!hasPDF)
+                    }
                 }
                 if let debugActions {
                     Section("디버그") {
@@ -183,7 +212,7 @@ struct SplitTopBar: View {
                     .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
-            .accessibilityLabel("PDF 메뉴")
+            .accessibilityLabel(isBlankPagedNote ? "노트 메뉴" : "PDF 메뉴")
         }
         .padding(.leading, 4)
         .padding(.trailing, 2)

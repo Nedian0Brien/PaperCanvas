@@ -74,8 +74,12 @@ final class PaperThumbnailService {
         let rendered: UIImage
         switch paper.documentKind {
         case .note:
-            rendered = renderPDFThumbnail(for: paper, palette: palette)
-                ?? renderBlankPageTile(palette: palette)
+            if paper.hasPDFSource {
+                rendered = renderPDFThumbnail(for: paper, palette: palette)
+                    ?? renderBlankPageTile(palette: palette)
+            } else {
+                rendered = renderBlankNoteThumbnail(for: paper, palette: palette)
+            }
         case .canvas:
             rendered = renderCanvasThumbnail(for: paper, palette: palette)
                 ?? renderBlankPageTile(palette: palette)
@@ -140,6 +144,35 @@ final class PaperThumbnailService {
         return renderer.image { ctx in
             palette.pageBackground.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
+    private func renderBlankNoteThumbnail(for paper: PaperDocument,
+                                          palette: ThumbnailPalette) -> UIImage {
+        let style = paper.notePageStyle
+        let pageSize = CGSize(width: paper.notePageWidth, height: paper.notePageHeight)
+        let scale = maxDimension / max(pageSize.width, pageSize.height)
+        let outSize = CGSize(width: pageSize.width * scale, height: pageSize.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: outSize)
+        let drawing: PKDrawing = {
+            if let data = paper.drawingData,
+               let d = try? PKDrawing(data: data) { return d }
+            return PKDrawing()
+        }()
+        return renderer.image { ctx in
+            palette.pageBackground.setFill()
+            ctx.fill(CGRect(origin: .zero, size: outSize))
+            let cg = ctx.cgContext
+            cg.saveGState()
+            cg.scaleBy(x: scale, y: scale)
+            style.drawBackground(in: CGRect(origin: .zero, size: pageSize),
+                                 context: cg)
+            cg.restoreGState()
+            if !drawing.strokes.isEmpty {
+                let firstPage = CGRect(origin: .zero, size: pageSize)
+                let inkImage = drawing.image(from: firstPage, scale: scale)
+                inkImage.draw(in: CGRect(origin: .zero, size: outSize))
+            }
         }
     }
 
