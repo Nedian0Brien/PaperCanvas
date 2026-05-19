@@ -37,6 +37,14 @@ struct ScrapCardContent: View {
                 .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Fallback opaque-ish paper backing so the card always reads on the
+        // canvas, even if the Liquid Glass material fails to render (e.g. in
+        // a detached hosting context, low-power mode, or a destination
+        // without the necessary backdrop).
+        .background(
+            RoundedRectangle(cornerRadius: Radius.l, style: .continuous)
+                .fill(Color.Surface.paper.opacity(0.92))
+        )
         .chromeGlassTinted(tint, in: RoundedRectangle(cornerRadius: Radius.l, style: .continuous))
         .overlay(borderOverlay)
         .shadow(

@@ -169,6 +169,10 @@ struct PDFKitView: UIViewRepresentable {
         private var movingSelectionPageIndex: Int?
         private var movingSelectionOriginalStrokes: [InkStroke]?
         private var movingSelectionLastPoint: CGPoint?
+        private var movingSelectionStartPoint: CGPoint?
+        private var movingSelectionStartTime: TimeInterval?
+        private var movingSelectionDidExceedTapThreshold: Bool = false
+        private var lastSelectionMenuPageIndex: Int?
 
         init(_ parent: PDFKitView) { self.parent = parent }
 
@@ -585,10 +589,15 @@ struct PDFKitView: UIViewRepresentable {
                 movingSelectionPageIndex = sample.pageIndex
                 movingSelectionOriginalStrokes = parent.pageInkStrokes[sample.pageIndex] ?? []
                 movingSelectionLastPoint = sample.point.location
+                movingSelectionStartPoint = sample.point.location
+                movingSelectionStartTime = touch.timestamp
+                movingSelectionDidExceedTapThreshold = false
+                LassoSelectionMenu.shared.dismiss()
                 activeLassoPageIndex = sample.pageIndex
                 activeLassoMode = nil
                 activeLassoPoints = []
             } else {
+                LassoSelectionMenu.shared.dismiss()
                 selectedStrokeIDsByPage.removeAll()
                 activeLassoPageIndex = sample.pageIndex
                 activeLassoMode = parent.palette.lassoMode
@@ -645,6 +654,8 @@ struct PDFKitView: UIViewRepresentable {
                 return
             }
             let selected = selectStrokes(pageIndex: pageIndex, mode: mode, points: activeLassoPoints)
+            let wasEmptyAreaTap = selected.isEmpty && isEmptyAreaTap()
+            let tapLocation = activeLassoPoints.first?.location
             if selected.isEmpty {
                 selectedStrokeIDsByPage.removeValue(forKey: pageIndex)
             } else {
@@ -653,6 +664,32 @@ struct PDFKitView: UIViewRepresentable {
             clearActiveLassoState()
             parent.palette.isStrokeInProgress = false
             rebuildRenderedInk()
+            if wasEmptyAreaTap, let pageLocation = tapLocation, InkLassoClipboard.hasStrokes {
+                DispatchQueue.main.async { [weak self] in
+                    self?.presentPasteShortcut(pageIndex: pageIndex, at: pageLocation)
+                }
+            }
+        }
+
+        private func isEmptyAreaTap() -> Bool {
+            guard let startTime = activeStrokeStartTime else { return false }
+            let elapsed = ProcessInfo.processInfo.systemUptime - startTime
+            guard elapsed <= Self.tapDurationThreshold else { return false }
+            let pts = activeLassoPoints
+            guard let first = pts.first?.location else { return false }
+            return pts.allSatisfy {
+                hypot($0.location.x - first.x, $0.location.y - first.y) <= Self.tapMovementThreshold
+            }
+        }
+
+        private func presentPasteShortcut(pageIndex: Int, at pageLocation: CGPoint) {
+            guard let wrapper else { return }
+            let smallRect = CGRect(x: pageLocation.x - 1, y: pageLocation.y - 1, width: 2, height: 2)
+            guard let viewRect = convertPageRectToWrapper(pageBounds: smallRect, pageIndex: pageIndex) else { return }
+            let center = CGPoint(x: viewRect.midX, y: viewRect.midY)
+            LassoSelectionMenu.shared.presentPasteShortcut(in: wrapper, sourcePoint: center) { [weak self] in
+                self?.pasteSelectionStrokes(pageIndex: pageIndex, at: pageLocation)
+            }
         }
 
         private func cancelLasso() {
@@ -672,6 +709,9 @@ struct PDFKitView: UIViewRepresentable {
             movingSelectionPageIndex = nil
             movingSelectionOriginalStrokes = nil
             movingSelectionLastPoint = nil
+            movingSelectionStartPoint = nil
+            movingSelectionStartTime = nil
+            movingSelectionDidExceedTapThreshold = false
         }
 
         private func makeInkPoint(from touch: UITouch,
@@ -835,6 +875,11 @@ struct PDFKitView: UIViewRepresentable {
             guard let lastPoint = movingSelectionLastPoint,
                   let selectedIDs = selectedStrokeIDsByPage[pageIndex],
                   !selectedIDs.isEmpty else { return }
+            if let startPoint = movingSelectionStartPoint,
+               !movingSelectionDidExceedTapThreshold,
+               hypot(point.x - startPoint.x, point.y - startPoint.y) > Self.tapMovementThreshold {
+                movingSelectionDidExceedTapThreshold = true
+            }
             let delta = CGVector(dx: point.x - lastPoint.x, dy: point.y - lastPoint.y)
             guard abs(delta.dx) > 0.01 || abs(delta.dy) > 0.01 else { return }
             let current = parent.pageInkStrokes[pageIndex] ?? []
@@ -847,9 +892,28 @@ struct PDFKitView: UIViewRepresentable {
             rebuildRenderedInk()
         }
 
+        private static let tapMovementThreshold: CGFloat = 6
+        private static let tapDurationThreshold: TimeInterval = 0.35
+
         private func finishMovingSelection(pageIndex: Int) {
             let before = movingSelectionOriginalStrokes ?? []
             let after = parent.pageInkStrokes[pageIndex] ?? []
+            let now = ProcessInfo.processInfo.systemUptime
+            let elapsed = (movingSelectionStartTime.map { now - $0 }) ?? .infinity
+            let isTap = !movingSelectionDidExceedTapThreshold
+                && elapsed <= Self.tapDurationThreshold
+            if isTap {
+                if before != after {
+                    setStrokes(before, for: pageIndex)
+                }
+                clearActiveLassoState()
+                parent.palette.isStrokeInProgress = false
+                rebuildRenderedInk()
+                DispatchQueue.main.async { [weak self] in
+                    self?.presentSelectionMenu(pageIndex: pageIndex)
+                }
+                return
+            }
             if before != after {
                 undoStack.append(PDFInkUndoAction(pageIndex: pageIndex, before: before, after: after))
                 redoStack.removeAll()
@@ -930,6 +994,132 @@ struct PDFKitView: UIViewRepresentable {
             } else {
                 selectedStrokeIDsByPage[pageIndex] = pruned
             }
+        }
+
+        // MARK: - Selection context menu
+
+        private var activeColorPickerBridge: ColorPickerBridge?
+
+        private func presentSelectionMenu(pageIndex: Int) {
+            guard let wrapper,
+                  let selectionBounds = selectedStrokeBounds(pageIndex: pageIndex),
+                  let sourceRect = convertPageRectToWrapper(pageBounds: selectionBounds,
+                                                             pageIndex: pageIndex) else { return }
+            lastSelectionMenuPageIndex = pageIndex
+            let actions = LassoMenuActions(
+                canPaste: InkLassoClipboard.hasStrokes,
+                onCut: { [weak self] in self?.cutSelection(pageIndex: pageIndex) },
+                onCopy: { [weak self] in self?.copySelection(pageIndex: pageIndex) },
+                onPaste: { [weak self] in self?.pasteSelectionStrokes(pageIndex: pageIndex) },
+                onRecolor: { [weak self] color in self?.recolorSelection(pageIndex: pageIndex, color: color) },
+                onPickCustomColor: { [weak self] in self?.presentCustomColorPicker(pageIndex: pageIndex) },
+                onDelete: { [weak self] in self?.deleteSelection(pageIndex: pageIndex) }
+            )
+            LassoSelectionMenu.shared.present(in: wrapper, sourceRect: sourceRect, actions: actions)
+        }
+
+        private func convertPageRectToWrapper(pageBounds: CGRect, pageIndex: Int) -> CGRect? {
+            guard let pdfView = hostPDFView,
+                  let document = pdfView.document,
+                  let page = document.page(at: pageIndex),
+                  let wrapper else { return nil }
+            let mediaBox = page.bounds(for: .mediaBox)
+            let p1 = pdfView.convert(
+                CGPoint(x: mediaBox.minX + pageBounds.minX,
+                        y: mediaBox.maxY - pageBounds.minY),
+                from: page
+            )
+            let p2 = pdfView.convert(
+                CGPoint(x: mediaBox.minX + pageBounds.maxX,
+                        y: mediaBox.maxY - pageBounds.maxY),
+                from: page
+            )
+            let pdfViewRect = CGRect(
+                x: min(p1.x, p2.x),
+                y: min(p1.y, p2.y),
+                width: abs(p2.x - p1.x),
+                height: abs(p2.y - p1.y)
+            )
+            return pdfView.convert(pdfViewRect, to: wrapper)
+        }
+
+        private func cutSelection(pageIndex: Int) {
+            copySelection(pageIndex: pageIndex)
+            deleteSelection(pageIndex: pageIndex)
+        }
+
+        private func copySelection(pageIndex: Int) {
+            guard let selectedIDs = selectedStrokeIDsByPage[pageIndex] else { return }
+            let strokes = (parent.pageInkStrokes[pageIndex] ?? [])
+                .filter { selectedIDs.contains($0.id) }
+            InkLassoClipboard.copy(strokes)
+        }
+
+        func pasteSelectionStrokes(pageIndex: Int, at pageLocation: CGPoint? = nil) {
+            guard let strokes = InkLassoClipboard.paste(), !strokes.isEmpty else { return }
+            let before = parent.pageInkStrokes[pageIndex] ?? []
+            let union = strokes.dropFirst().reduce(strokes[0].boundingBox) { $0.union($1.boundingBox) }
+            let center = CGPoint(x: union.midX, y: union.midY)
+            let target: CGPoint
+            if let pageLocation {
+                target = pageLocation
+            } else if let existing = selectedStrokeBounds(pageIndex: pageIndex) {
+                target = CGPoint(x: existing.midX + 20, y: existing.midY + 20)
+            } else {
+                target = CGPoint(x: center.x + 20, y: center.y + 20)
+            }
+            let delta = CGVector(dx: target.x - center.x, dy: target.y - center.y)
+            let translated = strokes.map { $0.translated(by: delta) }
+            let after = before + translated
+            selectedStrokeIDsByPage[pageIndex] = Set(translated.map(\.id))
+            applyReplacement(pageIndex: pageIndex, before: before, after: after, recordsUndo: true)
+        }
+
+        private func deleteSelection(pageIndex: Int) {
+            guard let selectedIDs = selectedStrokeIDsByPage[pageIndex],
+                  !selectedIDs.isEmpty else { return }
+            let before = parent.pageInkStrokes[pageIndex] ?? []
+            let after = before.filter { !selectedIDs.contains($0.id) }
+            guard after.count != before.count else { return }
+            selectedStrokeIDsByPage.removeValue(forKey: pageIndex)
+            applyReplacement(pageIndex: pageIndex, before: before, after: after, recordsUndo: true)
+        }
+
+        private func recolorSelection(pageIndex: Int, color: Color) {
+            guard let selectedIDs = selectedStrokeIDsByPage[pageIndex],
+                  !selectedIDs.isEmpty else { return }
+            let before = parent.pageInkStrokes[pageIndex] ?? []
+            var didChange = false
+            let after = before.map { stroke -> InkStroke in
+                guard selectedIDs.contains(stroke.id) else { return stroke }
+                let originalAlpha = CGFloat(stroke.color.alpha)
+                let newColor = InkColor(color, alpha: originalAlpha)
+                if newColor == stroke.color { return stroke }
+                didChange = true
+                var copy = stroke
+                copy.color = newColor
+                return copy
+            }
+            guard didChange else { return }
+            applyReplacement(pageIndex: pageIndex, before: before, after: after, recordsUndo: true)
+        }
+
+        private func presentCustomColorPicker(pageIndex: Int) {
+            guard let wrapper,
+                  let presenter = wrapper.findTopPresenter() else { return }
+            let picker = UIColorPickerViewController()
+            picker.supportsAlpha = false
+            picker.selectedColor = UIColor(parent.palette.color)
+            let bridge = ColorPickerBridge { [weak self] color in
+                guard let self else { return }
+                self.activeColorPickerBridge = nil
+                if let color {
+                    self.recolorSelection(pageIndex: pageIndex, color: Color(color))
+                }
+            }
+            picker.delegate = bridge
+            activeColorPickerBridge = bridge
+            presenter.present(picker, animated: true)
         }
 
         private func bounds(for points: [CGPoint]) -> CGRect {
@@ -1693,22 +1883,65 @@ private final class PencilHoverIndicatorView: UIView {
     }
 }
 
-private extension InkColor {
-    var uiColor: UIColor {
-        UIColor(red: CGFloat(red),
-                green: CGFloat(green),
-                blue: CGFloat(blue),
-                alpha: CGFloat(alpha))
-    }
-}
-
 private extension CGRect {
     var center: CGPoint {
         CGPoint(x: midX, y: midY)
     }
 }
 
-private extension InkStroke {
+final class ColorPickerBridge: NSObject, UIColorPickerViewControllerDelegate {
+    private let completion: (UIColor?) -> Void
+    private var settledColor: UIColor?
+    private var didReportFinal = false
+
+    init(completion: @escaping (UIColor?) -> Void) {
+        self.completion = completion
+    }
+
+    func colorPickerViewController(_ viewController: UIColorPickerViewController,
+                                   didSelect color: UIColor,
+                                   continuously: Bool) {
+        settledColor = color
+        if !continuously {
+            reportFinal(color: color)
+        }
+    }
+
+    func colorPickerViewControllerDidFinish(_ viewController: UIColorPickerViewController) {
+        reportFinal(color: settledColor ?? viewController.selectedColor)
+    }
+
+    private func reportFinal(color: UIColor) {
+        guard !didReportFinal else { return }
+        didReportFinal = true
+        completion(color)
+    }
+}
+
+extension UIView {
+    /// Walks the responder chain to find the top-most view controller that can
+    /// present another view controller. Used to present color pickers.
+    func findTopPresenter() -> UIViewController? {
+        var responder: UIResponder? = self
+        while let next = responder {
+            if let vc = next as? UIViewController {
+                var top: UIViewController = vc
+                while let presented = top.presentedViewController { top = presented }
+                return top
+            }
+            responder = next.next
+        }
+        if let scene = window?.windowScene,
+           let rootVC = scene.keyWindow?.rootViewController {
+            var top = rootVC
+            while let presented = top.presentedViewController { top = presented }
+            return top
+        }
+        return nil
+    }
+}
+
+extension InkStroke {
     func translated(by delta: CGVector) -> InkStroke {
         var copy = self
         copy.points = copy.points.map { point in

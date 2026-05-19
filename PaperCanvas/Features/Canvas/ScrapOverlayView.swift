@@ -90,6 +90,28 @@ final class ScrapOverlayView: UIView,
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        attachHostingControllerIfNeeded()
+    }
+
+    /// SwiftUI views hosted via `UIHostingController` need a real
+    /// `UIViewController` parent for some Liquid Glass / environment-aware
+    /// modifiers to materialize. Walk up the responder chain on first
+    /// window attachment and adopt the nearest VC.
+    private func attachHostingControllerIfNeeded() {
+        guard window != nil, hostingController.parent == nil else { return }
+        var responder: UIResponder? = next
+        while let r = responder {
+            if let vc = r as? UIViewController {
+                vc.addChild(hostingController)
+                hostingController.didMove(toParent: vc)
+                return
+            }
+            responder = r.next
+        }
+    }
+
     func update(from scrap: ScrapItem) {
         let newBase = CGPoint(x: scrap.positionX, y: scrap.positionY)
         let newSize = CGSize(width: max(Self.minSize.width, scrap.width),
@@ -125,15 +147,15 @@ final class ScrapOverlayView: UIView,
     }
 
     func applyZoom(_ scale: CGFloat) {
-        // PKCanvasView's zoom transform already scales subviews of its internal
-        // content view, so we only track the zoom for pan-delta normalization
-        // and keep the layout in world (un-zoomed) coordinates.
+        // PKCanvasView does NOT auto-apply its zoom transform to subviews
+        // added via `addSubview`. We have to scale and reposition manually so
+        // scraps track strokes (which PencilKit zooms internally).
         currentZoom = scale
-        transform = .identity
         bounds = CGRect(origin: .zero, size: baseSize)
+        transform = CGAffineTransform(scaleX: scale, y: scale)
         center = CGPoint(
-            x: basePosition.x + baseSize.width / 2,
-            y: basePosition.y + baseSize.height / 2
+            x: (basePosition.x + baseSize.width / 2) * scale,
+            y: (basePosition.y + baseSize.height / 2) * scale
         )
         refreshContent()
     }
@@ -213,11 +235,12 @@ final class ScrapOverlayView: UIView,
 
     @objc private func handlePan(_ g: UIPanGestureRecognizer) {
         guard let superview else { return }
-        // translation(in: superview) returns the delta in the superview's
-        // pre-transform coords. Since PKCanvasView's zoom is applied to the
-        // superview, this is already in world units — no /scale needed.
+        // basePosition lives in world (un-zoomed) coords, but the gesture
+        // translation comes back in scroll-view (post-zoom) points, so divide
+        // by the current zoom to keep finger and scrap in sync.
         let translation = g.translation(in: superview)
-        let baseDelta = CGPoint(x: translation.x, y: translation.y)
+        let scale = max(currentZoom, 0.0001)
+        let baseDelta = CGPoint(x: translation.x / scale, y: translation.y / scale)
         switch g.state {
         case .began:
             initialPanOrigin = basePosition
