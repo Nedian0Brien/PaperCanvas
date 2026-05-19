@@ -97,12 +97,11 @@ final class PaperThumbnailService {
         if hasStrokes { contentBounds = contentBounds.union(strokesBounds) }
         for f in scrapFrames { contentBounds = contentBounds.union(f) }
 
-        let sourceRect: CGRect
-        if !contentBounds.isNull && !contentBounds.isInfinite && (hasStrokes || hasScraps) {
-            sourceRect = contentBounds.insetBy(dx: -48, dy: -48)
-        } else {
-            sourceRect = CGRect(x: -400, y: -300, width: 800, height: 600)
+        guard hasStrokes || hasScraps,
+              !contentBounds.isNull, !contentBounds.isInfinite else {
+            return nil
         }
+        let sourceRect = contentBounds.insetBy(dx: -48, dy: -48)
         let scale = maxDimension / max(sourceRect.width, sourceRect.height)
         let outputSize = CGSize(width: sourceRect.width * scale, height: sourceRect.height * scale)
 
