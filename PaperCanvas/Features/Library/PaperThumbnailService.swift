@@ -23,7 +23,7 @@ final class PaperThumbnailService {
     /// Bumped whenever the rendering algorithm changes meaningfully, so old
     /// cached PNGs (which may have been written with a broken palette) are
     /// not served by the new code.
-    private static let cacheVersion = "v3"
+    private static let cacheVersion = "v4"
 
     private func fileURL(for paper: PaperDocument, style: UIUserInterfaceStyle) -> URL {
         let suffix = style == .dark ? "-dark" : "-light"
@@ -64,19 +64,21 @@ final class PaperThumbnailService {
         try? fm.removeItem(at: directory.appendingPathComponent("\(paper.id.uuidString).png"))
         try? fm.removeItem(at: directory.appendingPathComponent("\(paper.id.uuidString)-light.png"))
         try? fm.removeItem(at: directory.appendingPathComponent("\(paper.id.uuidString)-dark.png"))
+        try? fm.removeItem(at: directory.appendingPathComponent("\(paper.id.uuidString)-light-v3.png"))
+        try? fm.removeItem(at: directory.appendingPathComponent("\(paper.id.uuidString)-dark-v3.png"))
         let palette = ThumbnailPalette(style: style)
         let rendered: UIImage
         switch paper.documentKind {
         case .note:
             if paper.hasPDFSource {
                 rendered = renderPDFThumbnail(for: paper, palette: palette)
-                    ?? renderBlankPageTile(palette: palette)
+                    ?? renderBlankNoteThumbnail(for: paper, palette: palette)
             } else {
                 rendered = renderBlankNoteThumbnail(for: paper, palette: palette)
             }
         case .canvas:
             rendered = renderCanvasThumbnail(for: paper, palette: palette)
-                ?? renderBlankPageTile(palette: palette)
+                ?? renderEmptyCanvasThumbnail(for: paper, palette: palette)
         }
         if let png = rendered.pngData() {
             try? png.write(to: url, options: .atomic)
@@ -89,28 +91,43 @@ final class PaperThumbnailService {
     /// rasterize identically regardless of which trait collection is active
     /// when `UIGraphicsImageRenderer` runs its block.
     private struct ThumbnailPalette {
+        let style: UIUserInterfaceStyle
         let pageBackground: UIColor
         let scrapFill: UIColor
         let scrapStroke: UIColor
         let imagePlaceholder: UIColor
+        let scrapText: UIColor
+        let patternStroke: UIColor
+        let patternDot: UIColor
+        let ruleLine: UIColor
+        let ruleStrong: UIColor
 
         init(style: UIUserInterfaceStyle) {
-            // Mirror UIColor.systemBackground / secondarySystemBackground /
-            // systemGray4 / systemGray5 in each interface style as static RGB,
-            // so they rasterize identically regardless of which trait
-            // collection happens to be current when UIGraphicsImageRenderer
-            // runs its block.
+            self.style = style
             switch style {
             case .dark:
-                pageBackground   = UIColor(red: 0.00, green: 0.00, blue: 0.00, alpha: 1)
-                scrapFill        = UIColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1)
-                scrapStroke      = UIColor(red: 0.35, green: 0.35, blue: 0.36, alpha: 1)
-                imagePlaceholder = UIColor(red: 0.17, green: 0.17, blue: 0.18, alpha: 1)
+                // Slightly lifted off pure black so the page itself reads
+                // against the surrounding dark card chrome and so the scrap
+                // chips have somewhere to contrast against.
+                pageBackground   = UIColor(red: 0.07, green: 0.07, blue: 0.075, alpha: 1)
+                scrapFill        = UIColor(red: 0.18, green: 0.18, blue: 0.20, alpha: 1)
+                scrapStroke      = UIColor(red: 0.42, green: 0.42, blue: 0.45, alpha: 1)
+                imagePlaceholder = UIColor(red: 0.24, green: 0.24, blue: 0.26, alpha: 1)
+                scrapText        = UIColor(white: 0.92, alpha: 1)
+                patternStroke    = UIColor(white: 1.0, alpha: 0.18)
+                patternDot       = UIColor(white: 1.0, alpha: 0.32)
+                ruleLine         = UIColor(white: 1.0, alpha: 0.28)
+                ruleStrong       = UIColor(red: 1.0, green: 0.45, blue: 0.45, alpha: 0.55)
             default:
                 pageBackground   = UIColor.white
                 scrapFill        = UIColor.white
-                scrapStroke      = UIColor(red: 0.82, green: 0.82, blue: 0.84, alpha: 1)
+                scrapStroke      = UIColor(red: 0.78, green: 0.78, blue: 0.80, alpha: 1)
                 imagePlaceholder = UIColor(red: 0.90, green: 0.90, blue: 0.92, alpha: 1)
+                scrapText        = UIColor(white: 0.18, alpha: 1)
+                patternStroke    = UIColor(white: 0.0, alpha: 0.16)
+                patternDot       = UIColor(white: 0.0, alpha: 0.34)
+                ruleLine         = UIColor(white: 0.0, alpha: 0.22)
+                ruleStrong       = UIColor(red: 0.85, green: 0.25, blue: 0.25, alpha: 0.55)
             }
         }
     }
@@ -129,12 +146,20 @@ final class PaperThumbnailService {
         try? fm.removeItem(at: fileURL(for: paper, style: .dark))
     }
 
-    private func renderBlankPageTile(palette: ThumbnailPalette) -> UIImage {
+    /// Empty-state tile for a canvas with no strokes or scraps yet — draws
+    /// the canvas's background pattern so the user can still tell which kind
+    /// of paper they picked.
+    private func renderEmptyCanvasThumbnail(for paper: PaperDocument,
+                                            palette: ThumbnailPalette) -> UIImage {
         let size = CGSize(width: maxDimension * 0.75, height: maxDimension)
         let renderer = UIGraphicsImageRenderer(size: size)
+        let background = CanvasBackground(rawValue: paper.canvasBackgroundRaw) ?? .dots
         return renderer.image { ctx in
             palette.pageBackground.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
+            drawCanvasPattern(background, in: CGRect(origin: .zero, size: size),
+                              context: ctx.cgContext, palette: palette,
+                              spacing: 18, lineWidth: 0.6, dotRadius: 0.9)
         }
     }
 
@@ -153,12 +178,13 @@ final class PaperThumbnailService {
         return renderer.image { ctx in
             palette.pageBackground.setFill()
             ctx.fill(CGRect(origin: .zero, size: outSize))
-            let cg = ctx.cgContext
-            cg.saveGState()
-            cg.scaleBy(x: scale, y: scale)
-            style.drawBackground(in: CGRect(origin: .zero, size: pageSize),
-                                 context: cg)
-            cg.restoreGState()
+            // Draw the rulings directly at output scale (rather than scaling
+            // a page-sized context down) so hairlines don't collapse to
+            // sub-pixel widths and vanish in the thumbnail.
+            drawNoteRulings(style: style,
+                            in: CGRect(origin: .zero, size: outSize),
+                            context: ctx.cgContext,
+                            palette: palette)
             if !drawing.strokes.isEmpty {
                 let firstPage = CGRect(origin: .zero, size: pageSize)
                 let inkImage = drawing.image(from: firstPage, scale: scale)
@@ -178,7 +204,10 @@ final class PaperThumbnailService {
         let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
-            palette.pageBackground.setFill()
+            // PDFs render their own white page; fill white regardless of
+            // style so dark-mode thumbs don't show black bars in margin
+            // areas the PDF leaves transparent.
+            UIColor.white.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
             ctx.cgContext.scaleBy(x: scale, y: scale)
             ctx.cgContext.translateBy(x: 0, y: bounds.height)
@@ -214,17 +243,28 @@ final class PaperThumbnailService {
         let sourceRect = contentBounds.insetBy(dx: -48, dy: -48)
         let scale = maxDimension / max(sourceRect.width, sourceRect.height)
         let outputSize = CGSize(width: sourceRect.width * scale, height: sourceRect.height * scale)
+        let background = CanvasBackground(rawValue: paper.canvasBackgroundRaw) ?? .dots
 
         let renderer = UIGraphicsImageRenderer(size: outputSize)
         return renderer.image { ctx in
             palette.pageBackground.setFill()
             ctx.fill(CGRect(origin: .zero, size: outputSize))
 
+            // Background pattern is drawn at output scale so dots/lines stay
+            // crisp regardless of how zoomed-out the captured region is.
+            drawCanvasPattern(background,
+                              in: CGRect(origin: .zero, size: outputSize),
+                              context: ctx.cgContext,
+                              palette: palette,
+                              spacing: 16,
+                              lineWidth: 0.6,
+                              dotRadius: 0.9)
+
             let cg = ctx.cgContext
             cg.saveGState()
             cg.scaleBy(x: scale, y: scale)
             cg.translateBy(x: -sourceRect.origin.x, y: -sourceRect.origin.y)
-            drawScraps(scraps, in: cg, palette: palette)
+            drawScraps(scraps, in: cg, palette: palette, scale: scale)
             cg.restoreGState()
 
             if hasStrokes {
@@ -234,11 +274,18 @@ final class PaperThumbnailService {
         }
     }
 
-    private func drawScraps(_ scraps: [ScrapItem], in ctx: CGContext, palette: ThumbnailPalette) {
+    private func drawScraps(_ scraps: [ScrapItem],
+                            in ctx: CGContext,
+                            palette: ThumbnailPalette,
+                            scale: CGFloat) {
         let cornerRadius: CGFloat = 8
         let scrapFill = palette.scrapFill.cgColor
         let scrapStroke = palette.scrapStroke.cgColor
         let imagePlaceholder = palette.imagePlaceholder.cgColor
+        // Stroke width is specified in canvas-space units; scale it up so
+        // the drawn outline lands close to 1 device pixel at the thumbnail's
+        // final resolution.
+        let strokeWidth = max(1.0 / scale, 0.5)
         for scrap in scraps {
             let frame = CGRect(x: scrap.positionX, y: scrap.positionY,
                                width: scrap.width, height: scrap.height)
@@ -248,8 +295,12 @@ final class PaperThumbnailService {
                 ctx.setFillColor(scrapFill)
                 ctx.addPath(path)
                 ctx.fillPath()
+                if let text = scrap.text, !text.isEmpty {
+                    drawScrapText(text, in: frame, context: ctx,
+                                  color: palette.scrapText, scale: scale)
+                }
                 ctx.setStrokeColor(scrapStroke)
-                ctx.setLineWidth(1)
+                ctx.setLineWidth(strokeWidth)
                 ctx.addPath(path)
                 ctx.strokePath()
             case .image:
@@ -265,10 +316,191 @@ final class PaperThumbnailService {
                     ctx.fillPath()
                 }
                 ctx.setStrokeColor(scrapStroke)
-                ctx.setLineWidth(1)
+                ctx.setLineWidth(strokeWidth)
                 ctx.addPath(path)
                 ctx.strokePath()
             }
+        }
+    }
+
+    /// Renders the first few lines of a text scrap so it doesn't appear as
+    /// an empty placeholder in the canvas thumbnail. Font size is chosen in
+    /// canvas-space units so it stays readable after the scrap is shrunk
+    /// down to the thumbnail's render scale.
+    private func drawScrapText(_ text: String,
+                               in frame: CGRect,
+                               context: CGContext,
+                               color: UIColor,
+                               scale: CGFloat) {
+        let padding: CGFloat = 12
+        let textRect = frame.insetBy(dx: padding, dy: padding)
+        guard textRect.width > 4, textRect.height > 4 else { return }
+        // Pick a font that renders to roughly 9pt at the final thumbnail
+        // resolution. Clamp so very large scraps don't pick a huge font.
+        let targetThumbPt: CGFloat = 9
+        let fontSize = min(max(targetThumbPt / max(scale, 0.001), 10), frame.height * 0.35)
+        let font = UIFont.systemFont(ofSize: fontSize)
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: style
+        ]
+        let snippet = String(text.prefix(220))
+        UIGraphicsPushContext(context)
+        defer { UIGraphicsPopContext() }
+        (snippet as NSString).draw(with: textRect,
+                                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                                   attributes: attrs,
+                                   context: nil)
+    }
+
+    private func drawCanvasPattern(_ background: CanvasBackground,
+                                   in rect: CGRect,
+                                   context: CGContext,
+                                   palette: ThumbnailPalette,
+                                   spacing: CGFloat,
+                                   lineWidth: CGFloat,
+                                   dotRadius: CGFloat) {
+        guard background != .plain else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        switch background {
+        case .plain:
+            return
+        case .dots:
+            context.setFillColor(palette.patternDot.cgColor)
+            var y = spacing
+            while y < rect.maxY {
+                var x = spacing
+                while x < rect.maxX {
+                    context.fillEllipse(in: CGRect(x: x - dotRadius, y: y - dotRadius,
+                                                   width: dotRadius * 2,
+                                                   height: dotRadius * 2))
+                    x += spacing
+                }
+                y += spacing
+            }
+        case .grid:
+            context.setStrokeColor(palette.patternStroke.cgColor)
+            context.setLineWidth(lineWidth)
+            var x = spacing
+            while x < rect.maxX {
+                context.move(to: CGPoint(x: x, y: rect.minY))
+                context.addLine(to: CGPoint(x: x, y: rect.maxY))
+                x += spacing
+            }
+            var y = spacing
+            while y < rect.maxY {
+                context.move(to: CGPoint(x: rect.minX, y: y))
+                context.addLine(to: CGPoint(x: rect.maxX, y: y))
+                y += spacing
+            }
+            context.strokePath()
+        case .lines:
+            context.setStrokeColor(palette.patternStroke.cgColor)
+            context.setLineWidth(lineWidth)
+            var y = spacing
+            while y < rect.maxY {
+                context.move(to: CGPoint(x: rect.minX, y: y))
+                context.addLine(to: CGPoint(x: rect.maxX, y: y))
+                y += spacing
+            }
+            context.strokePath()
+        }
+    }
+
+    /// Note rulings drawn directly at thumbnail resolution. Matches the live
+    /// page styling (margins, cornell regions) but with stroke widths and
+    /// colors picked to survive scaling — `NotePageStyle.drawBackground`
+    /// uses 0.5pt hairlines and `UIColor.label` opacity that collapse to
+    /// nothing at thumbnail scale.
+    private func drawNoteRulings(style: NotePageStyle,
+                                 in rect: CGRect,
+                                 context: CGContext,
+                                 palette: ThumbnailPalette) {
+        guard style != .plain else { return }
+        let pageSize = NotePageStyle.defaultPageSize
+        let scaleX = rect.width / pageSize.width
+        let scaleY = rect.height / pageSize.height
+        let insets = style.pageInsets
+        let ruleRect = CGRect(
+            x: rect.minX + insets.left * scaleX,
+            y: rect.minY + insets.top * scaleY,
+            width: rect.width - (insets.left + insets.right) * scaleX,
+            height: rect.height - (insets.top + insets.bottom) * scaleY
+        )
+        let spacingY = style.ruleSpacing * scaleY
+        let spacingX = style.ruleSpacing * scaleX
+        let lineWidth: CGFloat = 0.75
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.setLineWidth(lineWidth)
+        switch style {
+        case .plain:
+            return
+        case .lined:
+            context.setStrokeColor(palette.ruleLine.cgColor)
+            var y = ruleRect.minY
+            while y <= ruleRect.maxY {
+                context.move(to: CGPoint(x: ruleRect.minX, y: y))
+                context.addLine(to: CGPoint(x: ruleRect.maxX, y: y))
+                y += spacingY
+            }
+            context.strokePath()
+            context.setStrokeColor(palette.ruleStrong.cgColor)
+            let marginX = ruleRect.minX - 32 * scaleX
+            context.move(to: CGPoint(x: marginX, y: rect.minY + 24 * scaleY))
+            context.addLine(to: CGPoint(x: marginX, y: rect.maxY - 24 * scaleY))
+            context.strokePath()
+        case .grid:
+            context.setStrokeColor(palette.ruleLine.cgColor)
+            var x = ruleRect.minX
+            while x <= ruleRect.maxX {
+                context.move(to: CGPoint(x: x, y: ruleRect.minY))
+                context.addLine(to: CGPoint(x: x, y: ruleRect.maxY))
+                x += spacingX
+            }
+            var y = ruleRect.minY
+            while y <= ruleRect.maxY {
+                context.move(to: CGPoint(x: ruleRect.minX, y: y))
+                context.addLine(to: CGPoint(x: ruleRect.maxX, y: y))
+                y += spacingY
+            }
+            context.strokePath()
+        case .dots:
+            context.setFillColor(palette.patternDot.cgColor)
+            let r: CGFloat = 1.1
+            var y = ruleRect.minY
+            while y <= ruleRect.maxY {
+                var x = ruleRect.minX
+                while x <= ruleRect.maxX {
+                    context.fillEllipse(in: CGRect(x: x - r, y: y - r,
+                                                   width: r * 2, height: r * 2))
+                    x += spacingX
+                }
+                y += spacingY
+            }
+        case .cornell:
+            let cueX = rect.minX + insets.left * scaleX
+            let summaryY = rect.maxY - insets.bottom * scaleY
+            context.setStrokeColor(palette.ruleLine.cgColor)
+            var y = ruleRect.minY
+            while y <= ruleRect.maxY {
+                context.move(to: CGPoint(x: cueX, y: y))
+                context.addLine(to: CGPoint(x: rect.maxX - insets.right * scaleX, y: y))
+                y += spacingY
+            }
+            context.strokePath()
+            context.setStrokeColor(UIColor(white: palette.style == .dark ? 1 : 0,
+                                           alpha: 0.45).cgColor)
+            context.setLineWidth(1.0)
+            context.move(to: CGPoint(x: cueX, y: rect.minY + 32 * scaleY))
+            context.addLine(to: CGPoint(x: cueX, y: summaryY))
+            context.move(to: CGPoint(x: rect.minX + 24 * scaleX, y: summaryY))
+            context.addLine(to: CGPoint(x: rect.maxX - 24 * scaleX, y: summaryY))
+            context.strokePath()
         }
     }
 
