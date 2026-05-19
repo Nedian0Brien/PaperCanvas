@@ -394,10 +394,15 @@ private struct DocumentSwitcherCard: View {
     let document: PaperDocument
     let isActive: Bool
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var thumbnail: UIImage?
 
+    private var interfaceStyle: UIUserInterfaceStyle {
+        colorScheme == .dark ? .dark : .light
+    }
+
     private var thumbnailKey: String {
-        "\(document.id.uuidString)-\(document.updatedAt.timeIntervalSince1970)"
+        "\(document.id.uuidString)-\(document.updatedAt.timeIntervalSince1970)-\(interfaceStyle.rawValue)"
     }
 
     var body: some View {
@@ -440,7 +445,7 @@ private struct DocumentSwitcherCard: View {
         .padding(.bottom, 4)
         .contentShape(.rect)
         .task(id: thumbnailKey) {
-            let image = PaperThumbnailService.shared.currentThumbnail(for: document)
+            let image = PaperThumbnailService.shared.currentThumbnail(for: document, style: interfaceStyle)
             guard !Task.isCancelled else { return }
             thumbnail = image
         }
