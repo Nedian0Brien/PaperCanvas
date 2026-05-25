@@ -1374,7 +1374,13 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                 width: max(activeRect.width, activeRect.maxX + shiftX),
                 height: max(activeRect.height, activeRect.maxY + shiftY)
             )
-            if canvas.contentSize != finalSize {
+            // Compare against our own last applied value rather than
+            // `canvas.contentSize` directly: UIScrollView/PKCanvasView can
+            // mutate `canvas.contentSize` as a side-effect of zooming (e.g.
+            // scaling it by the current zoomScale), and re-asserting our
+            // intended size mid-flight forces a clamp that snaps the
+            // contentOffset toward the origin the moment a pinch ends.
+            if finalSize != lastAppliedContentSize {
                 canvas.contentSize = finalSize
                 lastAppliedContentSize = finalSize
                 // Make sure the scroll offset is still inside the (possibly
