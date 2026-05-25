@@ -14,6 +14,7 @@ struct PageNoteView: View {
     let pageCount: Int
     let pageSize: CGSize
     let palette: PaletteState
+    var isSplitResizing: Bool = false
 
     var onPageNoteActivated: (() -> Void)? = nil
     var onStrokeBegan: (() -> Void)? = nil
@@ -31,6 +32,7 @@ struct PageNoteView: View {
                 tool: palette.pkTool,
                 toolKind: palette.tool,
                 isMarkupActive: palette.lastActiveCanvas == .pdfInk,
+                isSplitResizing: isSplitResizing,
                 undoTrigger: palette.undoTrigger,
                 redoTrigger: palette.redoTrigger,
                 onActivated: {
@@ -72,6 +74,7 @@ private struct PageNoteScrollView: UIViewRepresentable {
     let tool: PKTool
     let toolKind: ToolKind
     let isMarkupActive: Bool
+    let isSplitResizing: Bool
     let undoTrigger: UUID?
     let redoTrigger: UUID?
     let onActivated: () -> Void
@@ -96,7 +99,9 @@ private struct PageNoteScrollView: UIViewRepresentable {
                                         pageCount: pageCount,
                                         pageSize: pageSize)
         context.coordinator.applyTool(tool, kind: toolKind)
-        context.coordinator.applyDrawingIfNeeded(drawing)
+        if !isSplitResizing {
+            context.coordinator.applyDrawingIfNeeded(drawing)
+        }
         context.coordinator.applyUndoRedoTriggers(undo: undoTrigger, redo: redoTrigger)
         if isMarkupActive { context.coordinator.makeFirstResponderIfNeeded() }
     }
@@ -114,6 +119,10 @@ private struct PageNoteScrollView: UIViewRepresentable {
         private var hasConfigured = false
         private var suppressDrawingPropagation = false
         private var toolPicker: PKToolPicker?
+        private var lastLayoutStyle: NotePageStyle?
+        private var lastLayoutPageCount: Int?
+        private var lastLayoutPageSize: CGSize?
+        private var lastLayoutContentSize: CGSize?
 
         init(_ parent: PageNoteScrollView) {
             self.parent = parent
@@ -193,20 +202,33 @@ private struct PageNoteScrollView: UIViewRepresentable {
             let gap: CGFloat = 24
             let totalHeight = pageSize.height * CGFloat(count) + gap * CGFloat(count - 1)
             let contentSize = CGSize(width: pageSize.width, height: totalHeight)
+            let layoutChanged = lastLayoutStyle != pageStyle ||
+                lastLayoutPageCount != count ||
+                lastLayoutPageSize != pageSize ||
+                lastLayoutContentSize != contentSize
 
-            host.pageStyle = pageStyle
-            host.pageCount = count
-            host.pageSize = pageSize
-            host.pageGap = gap
-            patternView.configure(style: pageStyle,
-                                  pageSize: pageSize,
-                                  pageCount: count,
-                                  gap: gap)
+            if layoutChanged {
+                host.pageStyle = pageStyle
+                host.pageCount = count
+                host.pageSize = pageSize
+                host.pageGap = gap
+                patternView.configure(style: pageStyle,
+                                      pageSize: pageSize,
+                                      pageCount: count,
+                                      gap: gap)
 
-            content.frame = CGRect(origin: .zero, size: contentSize)
-            patternView.frame = CGRect(origin: .zero, size: contentSize)
-            canvas.frame = CGRect(origin: .zero, size: contentSize)
-            scrollView.contentSize = contentSize
+                let contentFrame = CGRect(origin: .zero, size: contentSize)
+                content.frame = contentFrame
+                patternView.frame = contentFrame
+                canvas.frame = contentFrame
+                scrollView.contentSize = contentSize
+
+                lastLayoutStyle = pageStyle
+                lastLayoutPageCount = count
+                lastLayoutPageSize = pageSize
+                lastLayoutContentSize = contentSize
+            }
+
             host.applyContentInsetForCentering()
         }
 
@@ -354,6 +376,10 @@ final class PageNotePatternView: UIView {
                    pageSize: CGSize,
                    pageCount: Int,
                    gap: CGFloat) {
+        guard self.pageStyle != style ||
+              self.pageSize != pageSize ||
+              self.pageCount != pageCount ||
+              self.pageGap != gap else { return }
         self.pageStyle = style
         self.pageSize = pageSize
         self.pageCount = pageCount

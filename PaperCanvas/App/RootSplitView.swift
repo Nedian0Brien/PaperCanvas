@@ -420,6 +420,7 @@ struct RootSplitView: View {
                 pageSize: CGSize(width: note.notePageWidth,
                                  height: note.notePageHeight),
                 palette: palettePDF,
+                isSplitResizing: dividerDragStartFraction != nil,
                 onPageNoteActivated: {
                     activeInputSurface = .note
                 },
