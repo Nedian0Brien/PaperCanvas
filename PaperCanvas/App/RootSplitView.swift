@@ -30,6 +30,7 @@ struct RootSplitView: View {
     @State private var pendingDeletion: PendingAnchorDeletion?
     @AppStorage("PaperCanvas.anchorScrapDeletionMode") private var anchorScrapDeletionModeRaw: String = ""
     @State private var leftFraction: CGFloat = 0.5
+    @State private var dividerDragStartFraction: CGFloat?
     @State private var loadError: String?
     @State private var didLoadNote = false
     @State private var didLoadCanvas = false
@@ -87,6 +88,7 @@ struct RootSplitView: View {
     private let dividerHitWidth: CGFloat = 28
     private let minFraction: CGFloat = 0.2
     private let maxFraction: CGFloat = 0.8
+    private let splitOnlySnapFraction: CGFloat = 0.04
 
     private var canvasBackground: CanvasBackground {
         guard let raw = activeCanvasPaper?.canvasBackgroundRaw else { return .dots }
@@ -240,64 +242,89 @@ struct RootSplitView: View {
     private var mainContent: some View {
         GeometryReader { geo in
             let totalWidth = geo.size.width
-            let leftWidth = max(totalWidth * minFraction,
-                                min(totalWidth * maxFraction,
-                                    totalWidth * leftFraction))
-            let rightWidth = max(0, totalWidth - leftWidth - dividerVisualWidth)
-            let canvasWidth = hasLeftPaneContent ? max(0, rightWidth - (dividerHitWidth - dividerVisualWidth)) : totalWidth
+            let isCanvasOnly = hasLeftPaneContent && leftFraction <= 0
+            let isNoteOnly = hasLeftPaneContent && leftFraction >= 1
+            let splitFraction = max(minFraction, min(maxFraction, leftFraction))
+            let leftWidth = isNoteOnly ? totalWidth : (isCanvasOnly ? 0 : totalWidth * splitFraction)
+            let canvasWidth: CGFloat = {
+                guard hasLeftPaneContent else { return totalWidth }
+                if isCanvasOnly { return totalWidth }
+                if isNoteOnly { return 0 }
+                return max(0, totalWidth - leftWidth - dividerHitWidth)
+            }()
 
-            HStack(spacing: 0) {
-                if hasLeftPaneContent {
-                    ZStack(alignment: .leading) {
-                        leftPane
-                        sideDock(palette: palettePDF, edge: .leading)
+            ZStack {
+                HStack(spacing: 0) {
+                    if hasLeftPaneContent && !isCanvasOnly {
+                        ZStack(alignment: .leading) {
+                            leftPane
+                            sideDock(palette: palettePDF, edge: .leading)
+                        }
+                        .frame(width: leftWidth)
+
+                        if !isNoteOnly {
+                            DividerHandle(visualWidth: dividerVisualWidth,
+                                          hitWidth: dividerHitWidth)
+                                .frame(width: dividerHitWidth)
+                                .gesture(dividerDrag(totalWidth: totalWidth))
+                        }
                     }
-                    .frame(width: leftWidth)
 
+                    if !isNoteOnly {
+                        ZStack(alignment: .trailing) {
+                            if activeCanvasPaper == nil {
+                                emptyPaneState(kind: .canvas)
+                            } else {
+                                CanvasView(drawing: $canvasDrawing,
+                                           contentOffset: $contentOffset,
+                                           resetTrigger: $canvasResetTrigger,
+                                           initialContentSize: CGSize(
+                                               width: activeCanvasPaper?.canvasContentWidth ?? 4000,
+                                               height: activeCanvasPaper?.canvasContentHeight ?? 4000),
+                                           scraps: sortedScraps,
+                                           palette: paletteCanvas,
+                                           background: canvasBackground,
+                                           onScrapTap: handleScrapTap,
+                                           onDrop: handleCanvasDrop,
+                                           onScrapMoved: handleScrapMoved,
+                                           onScrapResized: handleScrapResized,
+                                           onScrapEditRequested: beginEditingTextNote,
+                                           onScrapDeleted: handleScrapDeleted,
+                                           onZoomChanged: { scale in
+                                               canvasZoomScale = scale
+                                           },
+                                           onCanvasActivated: {
+                                               activeInputSurface = .canvas
+                                           },
+                                           onPencilTap: handlePencilTap,
+                                           onStrokeBegan: {
+                                               activeInputSurface = .canvas
+                                               paletteCanvas.isStrokeInProgress = true
+                                           },
+                                           onStrokeEnded: {
+                                               paletteCanvas.isStrokeInProgress = false
+                                           })
+                            }
+
+                            sideDock(palette: paletteCanvas, edge: .trailing)
+                        }
+                        .frame(width: canvasWidth)
+                    }
+                }
+
+                if isCanvasOnly {
                     DividerHandle(visualWidth: dividerVisualWidth,
                                   hitWidth: dividerHitWidth)
                         .frame(width: dividerHitWidth)
                         .gesture(dividerDrag(totalWidth: totalWidth))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if isNoteOnly {
+                    DividerHandle(visualWidth: dividerVisualWidth,
+                                  hitWidth: dividerHitWidth)
+                        .frame(width: dividerHitWidth)
+                        .gesture(dividerDrag(totalWidth: totalWidth))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-
-                ZStack(alignment: .trailing) {
-                    if activeCanvasPaper == nil {
-                        emptyPaneState(kind: .canvas)
-                    } else {
-                    CanvasView(drawing: $canvasDrawing,
-                               contentOffset: $contentOffset,
-                               resetTrigger: $canvasResetTrigger,
-                               initialContentSize: CGSize(
-                                   width: activeCanvasPaper?.canvasContentWidth ?? 4000,
-                                   height: activeCanvasPaper?.canvasContentHeight ?? 4000),
-                               scraps: sortedScraps,
-                               palette: paletteCanvas,
-                               background: canvasBackground,
-                               onScrapTap: handleScrapTap,
-                               onDrop: handleCanvasDrop,
-                               onScrapMoved: handleScrapMoved,
-                               onScrapResized: handleScrapResized,
-                               onScrapEditRequested: beginEditingTextNote,
-                               onScrapDeleted: handleScrapDeleted,
-                               onZoomChanged: { scale in
-                                   canvasZoomScale = scale
-                               },
-                               onCanvasActivated: {
-                                   activeInputSurface = .canvas
-                               },
-                               onPencilTap: handlePencilTap,
-                               onStrokeBegan: {
-                                   activeInputSurface = .canvas
-                                   paletteCanvas.isStrokeInProgress = true
-                               },
-                               onStrokeEnded: {
-                                   paletteCanvas.isStrokeInProgress = false
-                               })
-                    }
-
-                    sideDock(palette: paletteCanvas, edge: .trailing)
-                }
-                .frame(width: canvasWidth)
             }
         }
     }
@@ -884,10 +911,27 @@ struct RootSplitView: View {
     private func dividerDrag(totalWidth: CGFloat) -> some Gesture {
         DragGesture()
             .onChanged { value in
-                let baseWidth = totalWidth * leftFraction
+                if dividerDragStartFraction == nil {
+                    dividerDragStartFraction = leftFraction
+                }
+                let baseFraction = dividerDragStartFraction ?? leftFraction
+                let baseWidth = totalWidth * baseFraction
                 let proposed = (baseWidth + value.translation.width) / totalWidth
-                leftFraction = max(minFraction, min(maxFraction, proposed))
+                leftFraction = snappedSplitFraction(for: proposed)
             }
+            .onEnded { value in
+                let baseFraction = dividerDragStartFraction ?? leftFraction
+                let baseWidth = totalWidth * baseFraction
+                let proposed = (baseWidth + value.translation.width) / totalWidth
+                leftFraction = snappedSplitFraction(for: proposed)
+                dividerDragStartFraction = nil
+            }
+    }
+
+    private func snappedSplitFraction(for proposed: CGFloat) -> CGFloat {
+        if proposed <= splitOnlySnapFraction { return 0 }
+        if proposed >= 1 - splitOnlySnapFraction { return 1 }
+        return max(minFraction, min(maxFraction, proposed))
     }
 
     private func toggleDocumentSwitcher(_ kind: PaperDocumentKind) {

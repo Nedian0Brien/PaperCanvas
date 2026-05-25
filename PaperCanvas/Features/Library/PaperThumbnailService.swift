@@ -485,11 +485,13 @@ final class PaperThumbnailService {
         case .cornell:
             let cueX = rect.minX + insets.left * scaleX
             let summaryY = rect.maxY - insets.bottom * scaleY
+            let horizontalStartX = rect.minX + 24 * scaleX
+            let horizontalEndX = rect.maxX - insets.right * scaleX
             context.setStrokeColor(palette.ruleLine.cgColor)
             var y = ruleRect.minY
             while y <= ruleRect.maxY {
-                context.move(to: CGPoint(x: cueX, y: y))
-                context.addLine(to: CGPoint(x: rect.maxX - insets.right * scaleX, y: y))
+                context.move(to: CGPoint(x: horizontalStartX, y: y))
+                context.addLine(to: CGPoint(x: horizontalEndX, y: y))
                 y += spacingY
             }
             context.strokePath()

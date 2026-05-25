@@ -141,7 +141,12 @@ private struct PageNoteScrollView: UIViewRepresentable {
 
             let canvas = PKCanvasView()
             canvas.translatesAutoresizingMaskIntoConstraints = false
+            #if targetEnvironment(simulator)
             canvas.drawingPolicy = .anyInput
+            #else
+            canvas.drawingPolicy = .pencilOnly
+            #endif
+            canvas.isScrollEnabled = false
             canvas.backgroundColor = .clear
             canvas.isOpaque = false
             canvas.delegate = self

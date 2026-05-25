@@ -124,14 +124,16 @@ enum NotePageStyle: String, Codable, CaseIterable, Identifiable {
 
         case .cornell:
             // Three regions: cue column (left), note area (right), summary (bottom).
-            let cueX = insets.left
+            let cueX = rect.minX + insets.left
             let summaryY = rect.maxY - insets.bottom
-            // Note area lines
+            let horizontalStartX = rect.minX + 24
+            let horizontalEndX = rect.maxX - insets.right
+            // Note area lines span both cue and note columns.
             lineColor.setStroke()
             var y = ruleRect.minY
             while y <= ruleRect.maxY {
-                context.move(to: CGPoint(x: cueX, y: y))
-                context.addLine(to: CGPoint(x: rect.maxX - insets.right, y: y))
+                context.move(to: CGPoint(x: horizontalStartX, y: y))
+                context.addLine(to: CGPoint(x: horizontalEndX, y: y))
                 y += ruleSpacing
             }
             context.strokePath()
