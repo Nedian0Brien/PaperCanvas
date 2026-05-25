@@ -337,7 +337,12 @@ struct RootSplitView: View {
                         onMaximizeRight: { maximizeSide(.trailing) }
                     )
                     .position(x: dividerCenterX, y: geo.size.height * 0.5)
-                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.6, anchor: .center)
+                            .combined(with: .opacity),
+                        removal: .scale(scale: 0.4, anchor: .center)
+                            .combined(with: .opacity)
+                    ))
                 }
             }
         }
@@ -534,6 +539,12 @@ struct RootSplitView: View {
                        onTextHighlightCreated: handleTextHighlightCreated,
                        onAnchorTapped: handleAnchorTapped,
                        onAnchorDragRequested: anchorDragItems,
+                       onAnchorAddToCanvas: handleAnchorAddToCanvas,
+                       onAnchorViewInCanvas: handleAnchorTapped,
+                       onAnchorRecolor: handleAnchorRecolor,
+                       onAnchorCopyText: handleAnchorCopyText,
+                       onAnchorDelete: handleAnchorDelete,
+                       onAnchorHasLinkedScrap: anchorHasLinkedScrap,
                        onPDFInkActivated: {
                            activeInputSurface = .note
                        },
@@ -648,6 +659,97 @@ struct RootSplitView: View {
         if sorted.count > 1 {
             anchorScrapListAnchor = anchor
             anchorScrapListItems = sorted
+        }
+    }
+
+    private func anchorHasLinkedScrap(_ anchor: AnchorRef) -> Bool {
+        libraryPapers.flatMap(\.scrapItems).contains { $0.anchorID == anchor.id }
+    }
+
+    private func handleAnchorAddToCanvas(_ anchor: AnchorRef) {
+        guard let note = activeNotePaper,
+              let pdfDocument = pdfDocument,
+              anchor.pageIndex >= 0,
+              anchor.pageIndex < pdfDocument.pageCount,
+              let page = pdfDocument.page(at: anchor.pageIndex) else { return }
+        let position = CGPoint(x: contentOffset.x + 120, y: contentOffset.y + 120)
+        switch anchor.kind {
+        case .text:
+            guard let highlight = note.textHighlights.first(where: { $0.id == anchor.id }) else { return }
+            let selection = selectionFromQuads(highlight.quadPoints, on: page)
+            let text = selection?.string ?? ""
+            guard !text.isEmpty else { return }
+            let scrap = ScrapItem(
+                kind: .text,
+                text: text,
+                position: position,
+                size: estimateTextNoteSize(for: text),
+                sourcePageIndex: highlight.pageIndex,
+                sourceRect: highlight.boundingPageRect,
+                anchorKind: .text,
+                anchorID: highlight.id
+            )
+            scrap.document = activeCanvasPaper
+            modelContext.insert(scrap)
+        case .region:
+            guard let mark = note.regionMarks.first(where: { $0.id == anchor.id }) else { return }
+            let image = MarkerGestureController.renderPDFRegion(page: page,
+                                                                 rect: mark.pageRect,
+                                                                 scale: 2.0)
+            guard let data = image.pngData() else { return }
+            let scrap = ScrapItem(
+                kind: .image,
+                imageData: data,
+                position: position,
+                size: imageDisplaySize(for: image),
+                sourcePageIndex: mark.pageIndex,
+                sourceRect: mark.pageRect,
+                anchorKind: .region,
+                anchorID: mark.id
+            )
+            scrap.document = activeCanvasPaper
+            modelContext.insert(scrap)
+        }
+        activeCanvasPaper?.updatedAt = .now
+        scheduleSave()
+    }
+
+    private func handleAnchorRecolor(_ anchor: AnchorRef, _ hex: String) {
+        guard let note = activeNotePaper else { return }
+        switch anchor.kind {
+        case .text:
+            if let highlight = note.textHighlights.first(where: { $0.id == anchor.id }) {
+                highlight.colorHex = hex
+            }
+        case .region:
+            if let mark = note.regionMarks.first(where: { $0.id == anchor.id }) {
+                mark.colorHex = hex
+            }
+        }
+        note.updatedAt = .now
+        scheduleSave()
+    }
+
+    private func handleAnchorCopyText(_ anchor: AnchorRef) {
+        guard anchor.kind == .text,
+              let note = activeNotePaper,
+              let pdfDocument = pdfDocument,
+              anchor.pageIndex >= 0,
+              anchor.pageIndex < pdfDocument.pageCount,
+              let page = pdfDocument.page(at: anchor.pageIndex),
+              let highlight = note.textHighlights.first(where: { $0.id == anchor.id }),
+              let selection = selectionFromQuads(highlight.quadPoints, on: page) else { return }
+        let text = selection.string ?? ""
+        guard !text.isEmpty else { return }
+        UIPasteboard.general.string = text
+    }
+
+    private func handleAnchorDelete(_ anchor: AnchorRef) {
+        switch anchor.kind {
+        case .text:
+            requestDeletion(.textHighlight(anchor.id))
+        case .region:
+            requestDeletion(.regionMark(anchor.id))
         }
     }
 
