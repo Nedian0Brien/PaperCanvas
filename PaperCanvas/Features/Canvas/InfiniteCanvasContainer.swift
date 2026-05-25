@@ -17,7 +17,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
     let redoTrigger: UUID?
     let isMainCanvasActive: Bool
     var background: CanvasBackground = .dots
-    var onScrapTap: ((UUID) -> Void)? = nil
+    var onScrapTap: ((UUID, CGRect) -> Void)? = nil
     var onDrop: ((CanvasDropPayload) -> Void)? = nil
     var onScrapMoved: ((UUID, CGPoint) -> Void)? = nil
     var onScrapResized: ((UUID, CGSize) -> Void)? = nil
@@ -459,7 +459,8 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                     let view = ScrapOverlayView(scrap: scrap)
                     view.onTap = { [weak self] id in
                         self?.handleScrapSelection(id)
-                        self?.parent.onScrapTap?(id)
+                        let rect = self?.scrapViews[id].map { $0.convert($0.bounds, to: nil) } ?? .zero
+                        self?.parent.onScrapTap?(id, rect)
                     }
                     view.onPositionChanged = { [weak self] id, position in
                         self?.parent.onScrapMoved?(id, position)
@@ -1493,7 +1494,13 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
 
         func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
             guard let canvas = interaction.view as? PKCanvasView ?? self.canvas else { return }
-            let location = session.location(in: canvas)
+            // UIScrollView returns drop locations in scaled bounds coords
+            // (bounds.origin == contentOffset, axes scaled by zoomScale). Scraps
+            // are stored in unscaled content coords, so divide by zoom before
+            // forwarding to the model layer.
+            let rawLocation = session.location(in: canvas)
+            let zoom = max(canvas.zoomScale, 0.0001)
+            let location = CGPoint(x: rawLocation.x / zoom, y: rawLocation.y / zoom)
 
             if let anchorPayload = session.items.compactMap({ $0.localObject as? AnchorDragPayload }).first {
                 let payload = CanvasDropPayload(

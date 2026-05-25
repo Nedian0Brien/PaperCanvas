@@ -803,7 +803,7 @@ struct PaletteToolbar: View {
     }
 
     private func modeSegmentImage(systemName: String, title: String) -> UIImage {
-        let size = CGSize(width: 70, height: 28)
+        let size = CGSize(width: 70, height: 44)
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { _ in
             let tint = UIColor.label
@@ -811,26 +811,26 @@ struct PaletteToolbar: View {
             let symbol = UIImage(systemName: systemName, withConfiguration: symbolConfig)?
                 .withTintColor(tint, renderingMode: .alwaysOriginal)
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 11, weight: .semibold),
+                .font: UIFont.systemFont(ofSize: 10, weight: .semibold),
                 .foregroundColor: tint
             ]
             let text = NSString(string: title)
             let textSize = text.size(withAttributes: attrs)
             let iconSize = CGSize(width: 15, height: 15)
-            let spacing: CGFloat = 4
-            let totalWidth = iconSize.width + spacing + textSize.width
-            let startX = max(0, (size.width - totalWidth) / 2)
-            let centerY = size.height / 2
+            let spacing: CGFloat = 2
+            let totalHeight = iconSize.height + spacing + textSize.height
+            let startY = max(0, (size.height - totalHeight) / 2)
+            let centerX = size.width / 2
 
             symbol?.draw(in: CGRect(
-                x: startX,
-                y: centerY - iconSize.height / 2,
+                x: centerX - iconSize.width / 2,
+                y: startY,
                 width: iconSize.width,
                 height: iconSize.height
             ))
             text.draw(at: CGPoint(
-                x: startX + iconSize.width + spacing,
-                y: centerY - textSize.height / 2
+                x: centerX - textSize.width / 2,
+                y: startY + iconSize.height + spacing
             ), withAttributes: attrs)
         }.withRenderingMode(.alwaysOriginal)
     }

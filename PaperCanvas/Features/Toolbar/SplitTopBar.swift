@@ -31,7 +31,8 @@ struct SplitTopBar: View {
     var onAddTextNote: () -> Void = {}
     var onToggleDocumentSwitcher: (PaperDocumentKind) -> Void = { _ in }
     var onSelectDocument: (PaperDocument) -> Void = { _ in }
-    var onCreateDocument: (PaperDocumentKind) -> Void = { _ in }
+    var onCreateNote: (NotePageStyle) -> Void = { _ in }
+    var onCreateCanvas: (CanvasBackground) -> Void = { _ in }
 
     var canvasBackground: CanvasBackground = .dots
     var onPickCanvasBackground: (CanvasBackground) -> Void = { _ in }
@@ -101,7 +102,8 @@ struct SplitTopBar: View {
             documents: documents,
             activePaperID: kind == .note ? activeNotePaperID : activeCanvasPaperID,
             onSelectDocument: onSelectDocument,
-            onCreateDocument: { onCreateDocument(kind) }
+            onCreateNote: onCreateNote,
+            onCreateCanvas: onCreateCanvas
         )
         .chromeInteractiveGlassRect(cornerRadius: Radius.xl)
     }
@@ -339,7 +341,10 @@ private struct DocumentSwitcherPanel: View {
     let documents: [PaperDocument]
     let activePaperID: UUID?
     let onSelectDocument: (PaperDocument) -> Void
-    let onCreateDocument: () -> Void
+    let onCreateNote: (NotePageStyle) -> Void
+    let onCreateCanvas: (CanvasBackground) -> Void
+
+    private static let creatableCanvasBackgrounds: [CanvasBackground] = [.grid, .lines, .dots]
 
     @State private var hasAppeared = false
 
@@ -395,7 +400,26 @@ private struct DocumentSwitcherPanel: View {
     }
 
     private var createPill: some View {
-        Button(action: onCreateDocument) {
+        Menu {
+            switch selectedKind {
+            case .note:
+                ForEach(NotePageStyle.allCases) { style in
+                    Button {
+                        onCreateNote(style)
+                    } label: {
+                        Label(style.label, systemImage: style.systemImage)
+                    }
+                }
+            case .canvas:
+                ForEach(Self.creatableCanvasBackgrounds) { background in
+                    Button {
+                        onCreateCanvas(background)
+                    } label: {
+                        Label(background.label, systemImage: background.systemImage)
+                    }
+                }
+            }
+        } label: {
             HStack(spacing: 6) {
                 Image(systemName: "plus")
                 Text(selectedKind == .note ? "새 노트" : "새 캔버스")
@@ -406,6 +430,7 @@ private struct DocumentSwitcherPanel: View {
             .padding(.vertical, 8)
             .background(Capsule().fill(Color.AccentTokens.primary))
         }
+        .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityLabel(selectedKind == .note ? "새 노트 추가" : "새 캔버스 추가")
     }

@@ -22,6 +22,7 @@ struct PDFKitView: UIViewRepresentable {
     var onAnchorHasLinkedScrap: ((AnchorRef) -> Bool)? = nil
     var onPDFInkActivated: (() -> Void)? = nil
     var onPencilTap: (() -> Void)? = nil
+    var onNavigationArrival: ((CGRect) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -1624,10 +1625,53 @@ struct PDFKitView: UIViewRepresentable {
                                       at: CGPoint(x: target.pageRect.minX,
                                                   y: target.pageRect.maxY + 20))
             }
-            pdfView.go(to: dest)
+
+            if internalScrollView == nil {
+                attachScrollObservers()
+            }
+
+            // Animate the underlying scroll view instead of letting PDFView jump.
+            // Trick: ask PDFView for the destination contentOffset by performing
+            // the jump synchronously, then restore the original offset and
+            // animate to the captured target.
+            if let scrollView = internalScrollView {
+                let originalOffset = scrollView.contentOffset
+                pdfView.go(to: dest)
+                pdfView.layoutDocumentView()
+                let targetOffset = scrollView.contentOffset
+                if abs(originalOffset.x - targetOffset.x) < 0.5,
+                   abs(originalOffset.y - targetOffset.y) < 0.5 {
+                    invalidateViewportTracking()
+                    finishNavigation(target: target, page: page, pdfView: pdfView)
+                    return
+                }
+                scrollView.setContentOffset(originalOffset, animated: false)
+                UIView.animate(withDuration: 0.55,
+                               delay: 0,
+                               usingSpringWithDamping: 0.92,
+                               initialSpringVelocity: 0.2,
+                               options: [.curveEaseInOut, .allowUserInteraction],
+                               animations: {
+                    scrollView.setContentOffset(targetOffset, animated: false)
+                }, completion: { [weak self] _ in
+                    self?.finishNavigation(target: target, page: page, pdfView: pdfView)
+                })
+            } else {
+                pdfView.go(to: dest)
+                invalidateViewportTracking()
+                finishNavigation(target: target, page: page, pdfView: pdfView)
+            }
+        }
+
+        private func finishNavigation(target: PDFNavigationTarget,
+                                      page: PDFPage,
+                                      pdfView: PDFView) {
             invalidateViewportTracking()
             if !target.pageRect.isEmpty {
                 addTemporaryHighlight(rect: target.pageRect, on: page)
+                let rectInPDFView = pdfView.convert(target.pageRect, from: page)
+                let rectInWindow = pdfView.convert(rectInPDFView, to: nil)
+                parent.onNavigationArrival?(rectInWindow)
             }
         }
 

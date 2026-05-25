@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0714C63A04F2E622B59FBBC5 /* CanvasTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5087DD680AB8442C22FE6B18 /* CanvasTransfer.swift */; };
+		AA01BB02CC03DD04EE05F011 /* NavigationArrowOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA01BB02CC03DD04EE05F010 /* NavigationArrowOverlay.swift */; };
 		0DEC8F001CFA40B1A41EF2DC /* PaperCanvasApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9178DE9A9F2FD40DB0034A1C /* PaperCanvasApp.swift */; };
 		102D4ECCECF55ACF3EC8126D /* Glass.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE459CA174C95167ED475157 /* Glass.swift */; };
 		15BAE5A7E9651E9CFAAA33AF /* PageIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D913435FD78D2E7FA172423 /* PageIndicator.swift */; };
@@ -78,6 +79,7 @@
 		45D49EE585A47B4D608D4D29 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		469D5DFF3DF41DFF904D5369 /* Ink.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Ink.metal; sourceTree = "<group>"; };
 		5087DD680AB8442C22FE6B18 /* CanvasTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTransfer.swift; sourceTree = "<group>"; };
+		AA01BB02CC03DD04EE05F010 /* NavigationArrowOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationArrowOverlay.swift; sourceTree = "<group>"; };
 		5551A438DF66E57A8020A244 /* ContextRightZone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextRightZone.swift; sourceTree = "<group>"; };
 		56DA0FC3B4B390618A69CF2E /* PaperFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperFolder.swift; sourceTree = "<group>"; };
 		5B02E628DF9351673813C0F4 /* ScrapItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrapItem.swift; sourceTree = "<group>"; };
@@ -335,6 +337,7 @@
 			isa = PBXGroup;
 			children = (
 				5087DD680AB8442C22FE6B18 /* CanvasTransfer.swift */,
+				AA01BB02CC03DD04EE05F010 /* NavigationArrowOverlay.swift */,
 				84B7F65F4133460646449A5B /* SharedToolPicker.swift */,
 			);
 			path = Shared;
@@ -417,6 +420,7 @@
 				EFE6FF8A204021193131E182 /* CanvasBackground.swift in Sources */,
 				5E55F1CC1020D30C02FBA097 /* CanvasTileGrid.swift in Sources */,
 				0714C63A04F2E622B59FBBC5 /* CanvasTransfer.swift in Sources */,
+				AA01BB02CC03DD04EE05F011 /* NavigationArrowOverlay.swift in Sources */,
 				4046655C4C178D2C740D1345 /* CanvasView.swift in Sources */,
 				A194551DACCEA21F13E78705 /* Color+Tokens.swift in Sources */,
 				CC82EB0C54863E22E02CD391 /* ContextRightZone.swift in Sources */,

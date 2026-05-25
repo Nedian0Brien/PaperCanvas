@@ -9,7 +9,7 @@ struct CanvasView: View {
     let scraps: [ScrapItem]
     let palette: PaletteState
     var background: CanvasBackground = .dots
-    var onScrapTap: ((UUID) -> Void)? = nil
+    var onScrapTap: ((UUID, CGRect) -> Void)? = nil
     var onDrop: ((CanvasDropPayload) -> Void)? = nil
     var onScrapMoved: ((UUID, CGPoint) -> Void)? = nil
     var onScrapResized: ((UUID, CGSize) -> Void)? = nil

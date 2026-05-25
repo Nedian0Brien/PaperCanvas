@@ -24,6 +24,8 @@ struct RootSplitView: View {
     @State private var contentOffset: CGPoint = .zero
     @State private var currentPageIndex: Int = 0
     @State private var navigationTarget: PDFNavigationTarget?
+    @State private var pendingArrowSource: CGRect?
+    @State private var navigationArrow: NavigationArrow?
     @State private var canvasResetTrigger: UUID?
     @State private var anchorScrapListAnchor: AnchorRef?
     @State private var anchorScrapListItems: [ScrapItem] = []
@@ -118,6 +120,9 @@ struct RootSplitView: View {
         ZStack {
             mainContent
             documentSwitcherScrim
+            NavigationArrowOverlay(arrow: navigationArrow)
+                .allowsHitTesting(false)
+                .ignoresSafeArea()
         }
         .ignoresSafeArea(.keyboard)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -453,7 +458,8 @@ struct RootSplitView: View {
             onAddTextNote: beginAddingTextNote,
             onToggleDocumentSwitcher: toggleDocumentSwitcher,
             onSelectDocument: switchToPaper,
-            onCreateDocument: createDocument(of:),
+            onCreateNote: { style in createDocument(of: .note, noteStyle: style) },
+            onCreateCanvas: { background in createDocument(of: .canvas, canvasBackground: background) },
             canvasBackground: canvasBackground,
             onPickCanvasBackground: { type in
                 guard let canvas = activeCanvasPaper else { return }
@@ -548,7 +554,8 @@ struct RootSplitView: View {
                        onPDFInkActivated: {
                            activeInputSurface = .note
                        },
-                       onPencilTap: handlePencilTap)
+                       onPencilTap: handlePencilTap,
+                       onNavigationArrival: handleNavigationArrival)
         } else if let loadError {
             VStack(spacing: Spacing.m) {
                 Image(systemName: "exclamationmark.triangle")
@@ -590,7 +597,7 @@ struct RootSplitView: View {
         }
     }
 
-    private func handleScrapTap(_ id: UUID) {
+    private func handleScrapTap(_ id: UUID, scrapWindowRect: CGRect) {
         guard let scrap = (activeCanvasPaper?.scrapItems ?? []).first(where: { $0.id == id }) else { return }
         let rect = CGRect(x: scrap.sourceRectX,
                           y: scrap.sourceRectY,
@@ -600,6 +607,7 @@ struct RootSplitView: View {
             beginEditingTextNote(id)
             return
         }
+        pendingArrowSource = scrapWindowRect.isEmpty ? nil : scrapWindowRect
         jumpToSource(scrap: scrap)
     }
 
@@ -622,6 +630,21 @@ struct RootSplitView: View {
         } else {
             navigationTarget = PDFNavigationTarget(pageIndex: pageIndex,
                                                   pageRect: pageRect)
+        }
+    }
+
+    private func handleNavigationArrival(targetWindowRect: CGRect) {
+        guard let source = pendingArrowSource else { return }
+        pendingArrowSource = nil
+        let arrow = NavigationArrow(id: UUID(),
+                                    sourceWindowRect: source,
+                                    targetWindowRect: targetWindowRect)
+        navigationArrow = arrow
+        let arrowID = arrow.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            if navigationArrow?.id == arrowID {
+                navigationArrow = nil
+            }
         }
     }
 
@@ -949,21 +972,28 @@ struct RootSplitView: View {
     }
 
     private func handleCanvasDrop(_ payload: CanvasDropPayload) {
+        guard let canvas = activeCanvasPaper else { return }
         let size = estimateScrapSize(for: payload)
+        // Center the new scrap on the drop point so the finger lands roughly
+        // mid-card instead of at the top-left corner.
+        let centered = CGPoint(
+            x: payload.position.x - size.width / 2,
+            y: payload.position.y - size.height / 2
+        )
         let scrap = ScrapItem(
             kind: payload.kind,
             text: payload.text,
             imageData: payload.imageData,
-            position: payload.position,
+            position: centered,
             size: size,
             sourcePageIndex: payload.sourcePageIndex,
             sourceRect: payload.sourceRect,
             anchorKind: payload.anchorKind,
             anchorID: payload.anchorID
         )
-        scrap.document = activeCanvasPaper
+        scrap.document = canvas
         modelContext.insert(scrap)
-        activeCanvasPaper?.updatedAt = .now
+        canvas.updatedAt = .now
         scheduleSave()
     }
 
@@ -1137,9 +1167,14 @@ struct RootSplitView: View {
         }
     }
 
-    private func createDocument(of kind: PaperDocumentKind) {
+    private func createDocument(of kind: PaperDocumentKind,
+                                noteStyle: NotePageStyle = .lined,
+                                canvasBackground: CanvasBackground = .dots) {
         let title = nextBlankTitle(for: kind)
-        let newPaper = PaperDocument(title: title, kind: kind)
+        let newPaper = PaperDocument(title: title,
+                                     kind: kind,
+                                     notePageStyle: noteStyle,
+                                     canvasBackground: canvasBackground)
         let preferredFolder: PaperFolder? = {
             switch kind {
             case .note:   return activeNotePaper?.folder ?? activeCanvasPaper?.folder
