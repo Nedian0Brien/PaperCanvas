@@ -817,6 +817,14 @@ struct RootSplitView: View {
             let provider = NSItemProvider(object: text as NSString)
             let item = UIDragItem(itemProvider: provider)
             item.localObject = payload
+            let previewSize = estimateTextNoteSize(for: text)
+            item.previewProvider = {
+                let view = ScrapDragPreviewView(kind: .text,
+                                                text: text,
+                                                image: nil,
+                                                size: previewSize)
+                return UIDragPreview(view: view)
+            }
             return [item]
         case .region:
             guard let mark = note.regionMarks.first(where: { $0.id == anchor.id }) else { return [] }
@@ -836,6 +844,14 @@ struct RootSplitView: View {
             let provider = NSItemProvider(object: image)
             let item = UIDragItem(itemProvider: provider)
             item.localObject = payload
+            let previewSize = imageDisplaySize(for: image)
+            item.previewProvider = {
+                let view = ScrapDragPreviewView(kind: .image,
+                                                text: nil,
+                                                image: image,
+                                                size: previewSize)
+                return UIDragPreview(view: view)
+            }
             return [item]
         }
     }
