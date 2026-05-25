@@ -135,7 +135,7 @@ private struct PageNoteScrollView: UIViewRepresentable {
             scrollView.backgroundColor = .secondarySystemBackground
             scrollView.alwaysBounceVertical = true
             scrollView.showsVerticalScrollIndicator = true
-            scrollView.minimumZoomScale = 0.5
+            scrollView.minimumZoomScale = 0.2
             scrollView.maximumZoomScale = 4
             scrollView.delegate = self
             scrollView.contentInsetAdjustmentBehavior = .always
@@ -223,12 +223,17 @@ private struct PageNoteScrollView: UIViewRepresentable {
                 canvas.frame = contentFrame
                 scrollView.contentSize = contentSize
 
+                host.isFollowingWidthFit = true
                 lastLayoutStyle = pageStyle
                 lastLayoutPageCount = count
                 lastLayoutPageSize = pageSize
                 lastLayoutContentSize = contentSize
             }
 
+            if parent.isSplitResizing {
+                host.isFollowingWidthFit = true
+            }
+            host.applyWidthFitForCurrentBounds()
             host.applyContentInsetForCentering()
         }
 
@@ -311,6 +316,10 @@ private struct PageNoteScrollView: UIViewRepresentable {
             host?.applyContentInsetForCentering()
         }
 
+        func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+            host?.isFollowingWidthFit = false
+        }
+
         // MARK: UIPencilInteractionDelegate
 
         func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
@@ -332,10 +341,31 @@ final class PageNoteHostView: UIView {
     var pageCount: Int = 1
     var pageSize: CGSize = NotePageStyle.defaultPageSize
     var pageGap: CGFloat = 24
+    var isFollowingWidthFit = true
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        applyWidthFitForCurrentBounds()
         applyContentInsetForCentering()
+    }
+
+    func applyWidthFitForCurrentBounds() {
+        guard isFollowingWidthFit,
+              let scrollView,
+              let content,
+              scrollView.bounds.width > 0,
+              content.bounds.width > 0 else { return }
+
+        let horizontalBreathingRoom: CGFloat = 32
+        let availableWidth = max(1, scrollView.bounds.width - horizontalBreathingRoom)
+        let fitScale = max(0.2, min(1, availableWidth / content.bounds.width))
+
+        if abs(scrollView.minimumZoomScale - fitScale) > 0.001 {
+            scrollView.minimumZoomScale = fitScale
+        }
+        if abs(scrollView.zoomScale - fitScale) > 0.001 {
+            scrollView.setZoomScale(fitScale, animated: false)
+        }
     }
 
     /// Center the page horizontally when the scroll view is wider than the

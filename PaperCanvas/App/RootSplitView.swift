@@ -311,7 +311,20 @@ struct RootSplitView: View {
                     }
                 }
 
-                if hasLeftPaneContent {
+                if isCanvasOnly {
+                    SplitRevealButton(systemImage: "doc.text",
+                                      accessibilityLabel: "노트 펼치기") {
+                        revealSplit()
+                    }
+                    .position(x: dividerHitWidth * 0.5, y: geo.size.height * 0.5)
+                } else if isNoteOnly {
+                    SplitRevealButton(systemImage: "square.grid.2x2",
+                                      accessibilityLabel: "캔버스 펼치기") {
+                        revealSplit()
+                    }
+                    .position(x: totalWidth - dividerHitWidth * 0.5,
+                              y: geo.size.height * 0.5)
+                } else if hasLeftPaneContent {
                     DividerHandle(visualWidth: dividerVisualWidth,
                                   hitWidth: dividerHitWidth)
                         .frame(width: dividerHitWidth)
@@ -932,6 +945,12 @@ struct RootSplitView: View {
         return max(minFraction, min(maxFraction, proposed))
     }
 
+    private func revealSplit() {
+        withAnimation(Motion.indirect) {
+            leftFraction = 0.5
+        }
+    }
+
     private func toggleDocumentSwitcher(_ kind: PaperDocumentKind) {
         // Spring is required so that matchedGeometryEffect interpolation between
         // the title capsule and the expanded panel is actually visible — a 180ms
@@ -1345,6 +1364,26 @@ private struct DividerHandle: View {
         .frame(width: hitWidth)
         .contentShape(.rect)
         .hoverEffect(.lift)
+    }
+}
+
+private struct SplitRevealButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.Ink.primary)
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .chromeGlassCapsule()
+        .contentShape(.rect)
+        .hoverEffect(.lift)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
