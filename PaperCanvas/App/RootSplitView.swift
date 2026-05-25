@@ -242,16 +242,21 @@ struct RootSplitView: View {
     private var mainContent: some View {
         GeometryReader { geo in
             let totalWidth = geo.size.width
-            let isCanvasOnly = hasLeftPaneContent && leftFraction <= 0
-            let isNoteOnly = hasLeftPaneContent && leftFraction >= 1
-            let splitFraction = max(minFraction, min(maxFraction, leftFraction))
+            let isDraggingDivider = dividerDragStartFraction != nil
+            let isCanvasOnly = hasLeftPaneContent && !isDraggingDivider && leftFraction <= 0
+            let isNoteOnly = hasLeftPaneContent && !isDraggingDivider && leftFraction >= 1
+            let splitFraction = isDraggingDivider
+                ? max(0, min(1, leftFraction))
+                : max(minFraction, min(maxFraction, leftFraction))
             let leftWidth = isNoteOnly ? totalWidth : (isCanvasOnly ? 0 : totalWidth * splitFraction)
             let canvasWidth: CGFloat = {
                 guard hasLeftPaneContent else { return totalWidth }
                 if isCanvasOnly { return totalWidth }
                 if isNoteOnly { return 0 }
-                return max(0, totalWidth - leftWidth - dividerHitWidth)
+                return max(0, totalWidth - leftWidth)
             }()
+            let dividerOffset = max(0, min(totalWidth - dividerHitWidth,
+                                           leftWidth - dividerHitWidth * 0.5))
 
             ZStack {
                 HStack(spacing: 0) {
@@ -261,13 +266,6 @@ struct RootSplitView: View {
                             sideDock(palette: palettePDF, edge: .leading)
                         }
                         .frame(width: leftWidth)
-
-                        if !isNoteOnly {
-                            DividerHandle(visualWidth: dividerVisualWidth,
-                                          hitWidth: dividerHitWidth)
-                                .frame(width: dividerHitWidth)
-                                .gesture(dividerDrag(totalWidth: totalWidth))
-                        }
                     }
 
                     if !isNoteOnly {
@@ -312,18 +310,13 @@ struct RootSplitView: View {
                     }
                 }
 
-                if isCanvasOnly {
+                if hasLeftPaneContent {
                     DividerHandle(visualWidth: dividerVisualWidth,
                                   hitWidth: dividerHitWidth)
                         .frame(width: dividerHitWidth)
                         .gesture(dividerDrag(totalWidth: totalWidth))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                } else if isNoteOnly {
-                    DividerHandle(visualWidth: dividerVisualWidth,
-                                  hitWidth: dividerHitWidth)
-                        .frame(width: dividerHitWidth)
-                        .gesture(dividerDrag(totalWidth: totalWidth))
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .offset(x: dividerOffset)
                 }
             }
         }
@@ -917,7 +910,7 @@ struct RootSplitView: View {
                 let baseFraction = dividerDragStartFraction ?? leftFraction
                 let baseWidth = totalWidth * baseFraction
                 let proposed = (baseWidth + value.translation.width) / totalWidth
-                leftFraction = snappedSplitFraction(for: proposed)
+                leftFraction = liveSplitFraction(for: proposed)
             }
             .onEnded { value in
                 let baseFraction = dividerDragStartFraction ?? leftFraction
@@ -926,6 +919,10 @@ struct RootSplitView: View {
                 leftFraction = snappedSplitFraction(for: proposed)
                 dividerDragStartFraction = nil
             }
+    }
+
+    private func liveSplitFraction(for proposed: CGFloat) -> CGFloat {
+        max(0, min(1, proposed))
     }
 
     private func snappedSplitFraction(for proposed: CGFloat) -> CGFloat {
