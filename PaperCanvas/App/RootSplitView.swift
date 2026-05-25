@@ -255,8 +255,9 @@ struct RootSplitView: View {
                 if isNoteOnly { return 0 }
                 return max(0, totalWidth - leftWidth)
             }()
-            let dividerOffset = max(0, min(totalWidth - dividerHitWidth,
-                                           leftWidth - dividerHitWidth * 0.5))
+            let dividerCenterX = max(dividerHitWidth * 0.5,
+                                     min(totalWidth - dividerHitWidth * 0.5,
+                                         leftWidth))
 
             ZStack {
                 HStack(spacing: 0) {
@@ -315,8 +316,7 @@ struct RootSplitView: View {
                                   hitWidth: dividerHitWidth)
                         .frame(width: dividerHitWidth)
                         .gesture(dividerDrag(totalWidth: totalWidth))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .offset(x: dividerOffset)
+                        .position(x: dividerCenterX, y: geo.size.height * 0.5)
                 }
             }
         }
@@ -902,7 +902,7 @@ struct RootSplitView: View {
     #endif
 
     private func dividerDrag(totalWidth: CGFloat) -> some Gesture {
-        DragGesture()
+        DragGesture(coordinateSpace: .global)
             .onChanged { value in
                 if dividerDragStartFraction == nil {
                     dividerDragStartFraction = leftFraction
