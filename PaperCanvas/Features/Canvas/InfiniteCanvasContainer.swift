@@ -535,6 +535,30 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
             if recognizer.state == .began || recognizer.state == .ended {
                 parent.onMainCanvasActivated?()
             }
+            if recognizer === activationTap, recognizer.state == .ended {
+                deselectScrapIfBackgroundTapped(recognizer)
+            }
+        }
+
+        /// Clear any selected scrap when the user taps an empty area of the
+        /// canvas. `activationTap` runs alongside the scrap-level tap
+        /// (`cancelsTouchesInView == false`), so use hit-testing to skip
+        /// taps that actually landed on a scrap, handle, or context-menu
+        /// bubble.
+        private func deselectScrapIfBackgroundTapped(_ recognizer: UIGestureRecognizer) {
+            guard let canvas else { return }
+            guard let selectedID = selectedScrapID,
+                  let selectedView = scrapViews[selectedID] else { return }
+            let location = recognizer.location(in: canvas)
+            if let hit = canvas.hitTest(location, with: nil) {
+                var view: UIView? = hit
+                while let v = view {
+                    if v is ScrapOverlayView { return }
+                    view = v.superview
+                }
+            }
+            selectedView.visualState = .normal
+            selectedScrapID = nil
         }
 
         private func publishDrawing(_ drawing: PKDrawing) {
