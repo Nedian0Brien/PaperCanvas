@@ -28,7 +28,7 @@ enum CanvasBackground: String, Codable, CaseIterable, Identifiable {
 
     static let tileSpacing: CGFloat = 28
 
-    func makePatternImage() -> UIImage? {
+    func makePatternImage(for traits: UITraitCollection? = nil) -> UIImage? {
         guard self != .plain else { return nil }
         let spacing = CanvasBackground.tileSpacing
         let size = CGSize(width: spacing, height: spacing)
@@ -37,15 +37,18 @@ enum CanvasBackground: String, Codable, CaseIterable, Identifiable {
         format.opaque = true
         let renderer = UIGraphicsImageRenderer(size: size, format: format)
 
+        let fill = traits.map { UIColor.systemBackground.resolvedColor(with: $0) } ?? .systemBackground
+        let ink = traits.map { UIColor.label.resolvedColor(with: $0) } ?? .label
+
         return renderer.image { ctx in
-            UIColor.systemBackground.setFill()
+            fill.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
 
             switch self {
             case .plain:
                 return
             case .dots:
-                UIColor.label.withAlphaComponent(0.30).setFill()
+                ink.withAlphaComponent(0.30).setFill()
                 let r: CGFloat = 1.0
                 ctx.cgContext.fillEllipse(in: CGRect(
                     x: spacing / 2 - r,
@@ -53,7 +56,7 @@ enum CanvasBackground: String, Codable, CaseIterable, Identifiable {
                     width: r * 2,
                     height: r * 2))
             case .grid:
-                UIColor.label.withAlphaComponent(0.16).setStroke()
+                ink.withAlphaComponent(0.16).setStroke()
                 ctx.cgContext.setLineWidth(0.5)
                 ctx.cgContext.move(to: CGPoint(x: 0, y: 0))
                 ctx.cgContext.addLine(to: CGPoint(x: spacing, y: 0))
@@ -61,7 +64,7 @@ enum CanvasBackground: String, Codable, CaseIterable, Identifiable {
                 ctx.cgContext.addLine(to: CGPoint(x: 0, y: spacing))
                 ctx.cgContext.strokePath()
             case .lines:
-                UIColor.label.withAlphaComponent(0.16).setStroke()
+                ink.withAlphaComponent(0.16).setStroke()
                 ctx.cgContext.setLineWidth(0.5)
                 ctx.cgContext.move(to: CGPoint(x: 0, y: 0))
                 ctx.cgContext.addLine(to: CGPoint(x: spacing, y: 0))
@@ -70,11 +73,18 @@ enum CanvasBackground: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    // Wrapped in `UIColor(dynamicProvider:)` so the pattern image is
+    // re-rasterized whenever the trait collection (e.g. light/dark mode)
+    // changes — a `UIColor(patternImage:)` built once would otherwise stay
+    // frozen at the appearance it was generated for.
     func uiBackgroundColor() -> UIColor {
-        if let image = makePatternImage() {
+        guard self != .plain else { return .systemBackground }
+        return UIColor { [self] traits in
+            guard let image = self.makePatternImage(for: traits) else {
+                return .systemBackground
+            }
             return UIColor(patternImage: image)
         }
-        return .systemBackground
     }
 }
 
