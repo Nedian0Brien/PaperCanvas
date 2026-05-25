@@ -14,6 +14,12 @@ struct PDFKitView: UIViewRepresentable {
     var onTextHighlightCreated: ((Int, [CGRect], String) -> Void)? = nil
     var onAnchorTapped: ((AnchorRef) -> Void)? = nil
     var onAnchorDragRequested: ((AnchorRef) -> [UIDragItem])? = nil
+    var onAnchorAddToCanvas: ((AnchorRef) -> Void)? = nil
+    var onAnchorViewInCanvas: ((AnchorRef) -> Void)? = nil
+    var onAnchorRecolor: ((AnchorRef, String) -> Void)? = nil
+    var onAnchorCopyText: ((AnchorRef) -> Void)? = nil
+    var onAnchorDelete: ((AnchorRef) -> Void)? = nil
+    var onAnchorHasLinkedScrap: ((AnchorRef) -> Bool)? = nil
     var onPDFInkActivated: (() -> Void)? = nil
     var onPencilTap: (() -> Void)? = nil
 
@@ -445,7 +451,40 @@ struct PDFKitView: UIViewRepresentable {
 
         func anchorOverlay(_ overlay: PDFAnchorOverlay,
                            didTap anchor: AnchorRef) {
-            parent.onAnchorTapped?(anchor)
+            presentAnchorContextMenu(for: anchor)
+        }
+
+        private func presentAnchorContextMenu(for anchor: AnchorRef) {
+            guard let wrapper,
+                  let sourceRect = convertPageRectToWrapper(pageBounds: anchor.pageRect,
+                                                             pageIndex: anchor.pageIndex) else { return }
+            let actions = AnchorContextMenuActions(
+                kind: anchor.kind,
+                hasLinkedScrap: parent.onAnchorHasLinkedScrap?(anchor) ?? false,
+                canCopyText: anchor.kind == .text,
+                onAddToCanvas: { [weak self] in
+                    self?.parent.onAnchorAddToCanvas?(anchor)
+                },
+                onViewInCanvas: { [weak self] in
+                    self?.parent.onAnchorViewInCanvas?(anchor)
+                },
+                onCopyText: { [weak self] in
+                    self?.parent.onAnchorCopyText?(anchor)
+                },
+                onRecolor: { [weak self] color in
+                    let hex = AnchorColor.hex(from: UIColor(color).cgColor)
+                    self?.parent.onAnchorRecolor?(anchor, hex)
+                },
+                onDelete: { [weak self] in
+                    self?.parent.onAnchorDelete?(anchor)
+                }
+            )
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let wrapper = self.wrapper else { return }
+                AnchorContextMenu.shared.present(in: wrapper,
+                                                  sourceRect: sourceRect,
+                                                  actions: actions)
+            }
         }
 
         func anchorOverlay(_ overlay: PDFAnchorOverlay,

@@ -596,14 +596,16 @@ struct LibraryView: View {
     private var toolbarContent: some ToolbarContent {
         if selectedScope != .trash {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Picker("보기", selection: $displayMode) {
-                    ForEach(LibraryDisplayMode.allCases) { mode in
-                        Label(mode.label, systemImage: mode.systemImage)
-                            .tag(mode)
+                Menu {
+                    Picker("보기", selection: $displayMode) {
+                        ForEach(LibraryDisplayMode.allCases) { mode in
+                            Label(mode.label, systemImage: mode.systemImage)
+                                .tag(mode)
+                        }
                     }
+                } label: {
+                    Label("보기", systemImage: displayMode.systemImage)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 124)
 
                 Menu {
                     Picker("정렬", selection: $sortMode) {

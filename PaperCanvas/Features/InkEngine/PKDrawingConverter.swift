@@ -343,3 +343,154 @@ final class LassoSelectionMenu: NSObject, @preconcurrency UIEditMenuInteractionD
         return ""
     }
 }
+
+// MARK: - Anchor context menu (text highlight / region mark)
+
+@MainActor
+struct AnchorContextMenuActions {
+    let kind: PDFAnchorKind
+    let hasLinkedScrap: Bool
+    let canCopyText: Bool
+    var onAddToCanvas: () -> Void
+    var onViewInCanvas: () -> Void
+    var onCopyText: () -> Void
+    var onRecolor: (Color) -> Void
+    var onDelete: () -> Void
+}
+
+@MainActor
+final class AnchorContextMenu: NSObject, @preconcurrency UIEditMenuInteractionDelegate {
+    static let shared = AnchorContextMenu()
+
+    private weak var hostView: UIView?
+    private var sourceRect: CGRect = .zero
+    private var actions: AnchorContextMenuActions?
+    private var interaction: UIEditMenuInteraction?
+
+    func present(in view: UIView, sourceRect: CGRect, actions: AnchorContextMenuActions) {
+        dismiss()
+        LassoSelectionMenu.shared.dismiss()
+        self.hostView = view
+        self.sourceRect = sourceRect
+        self.actions = actions
+
+        let interaction = UIEditMenuInteraction(delegate: self)
+        view.addInteraction(interaction)
+        self.interaction = interaction
+
+        let center = CGPoint(x: sourceRect.midX, y: sourceRect.minY)
+        let config = UIEditMenuConfiguration(identifier: NSString(string: "anchor-context"),
+                                             sourcePoint: center)
+        config.preferredArrowDirection = .down
+        interaction.presentEditMenu(with: config)
+    }
+
+    func dismiss() {
+        if let interaction, let hostView {
+            interaction.dismissMenu()
+            hostView.removeInteraction(interaction)
+        }
+        interaction = nil
+        hostView = nil
+        actions = nil
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction,
+                             targetRectFor configuration: UIEditMenuConfiguration) -> CGRect {
+        sourceRect
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction,
+                             menuFor configuration: UIEditMenuConfiguration,
+                             suggestedActions: [UIMenuElement]) -> UIMenu? {
+        guard let actions else { return nil }
+        var children: [UIMenuElement] = []
+
+        children.append(UIAction(title: "캔버스에 추가",
+                                 image: UIImage(systemName: "rectangle.stack.badge.plus")) { _ in
+            actions.onAddToCanvas()
+        })
+        if actions.hasLinkedScrap {
+            children.append(UIAction(title: "캔버스에서 보기",
+                                     image: UIImage(systemName: "arrow.up.right.square")) { _ in
+                actions.onViewInCanvas()
+            })
+        }
+        if actions.canCopyText {
+            children.append(UIAction(title: "텍스트 복사",
+                                     image: UIImage(systemName: "doc.on.doc")) { _ in
+                actions.onCopyText()
+            })
+        }
+        children.append(makeColorMenu(actions: actions))
+        children.append(UIAction(title: "삭제",
+                                 image: UIImage(systemName: "trash"),
+                                 attributes: .destructive) { _ in
+            actions.onDelete()
+        })
+        return UIMenu(title: "", children: children)
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction,
+                             willDismissMenuFor configuration: UIEditMenuConfiguration,
+                             animator: any UIEditMenuInteractionAnimating) {
+        animator.addCompletion { [weak self] in
+            guard let self else { return }
+            if let interaction = self.interaction, let host = self.hostView {
+                host.removeInteraction(interaction)
+            }
+            self.interaction = nil
+            self.hostView = nil
+            self.actions = nil
+        }
+    }
+
+    private func makeColorMenu(actions: AnchorContextMenuActions) -> UIMenu {
+        let children: [UIMenuElement] = PaletteState.defaultPresetColors.map { color in
+            let title = paletteColorTitle(color)
+            let image = swatchImage(for: color)
+            return UIAction(title: title, image: image) { _ in
+                actions.onRecolor(color)
+            }
+        }
+        return UIMenu(title: "색상 변경",
+                      image: UIImage(systemName: "paintpalette"),
+                      children: children)
+    }
+
+    private func swatchImage(for color: Color) -> UIImage? {
+        let size = CGSize(width: 20, height: 20)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            let cg = ctx.cgContext
+            cg.setFillColor(UIColor(color).cgColor)
+            cg.fillEllipse(in: CGRect(origin: .zero, size: size).insetBy(dx: 1, dy: 1))
+            cg.setStrokeColor(UIColor.label.withAlphaComponent(0.25).cgColor)
+            cg.setLineWidth(0.75)
+            cg.strokeEllipse(in: CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5))
+        }.withRenderingMode(.alwaysOriginal)
+    }
+
+    private func paletteColorTitle(_ color: Color) -> String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+        UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
+        let presets: [(name: String, color: (CGFloat, CGFloat, CGFloat))] = [
+            ("검정", (0, 0, 0)),
+            ("빨강", (0.85, 0.20, 0.20)),
+            ("주황", (0.95, 0.55, 0.10)),
+            ("노랑", (0.95, 0.80, 0.20)),
+            ("초록", (0.30, 0.70, 0.40)),
+            ("파랑", (0.20, 0.50, 0.85)),
+            ("보라", (0.55, 0.30, 0.75)),
+            ("회색", (0.50, 0.50, 0.55))
+        ]
+        for preset in presets {
+            if abs(preset.color.0 - r) < 0.05,
+               abs(preset.color.1 - g) < 0.05,
+               abs(preset.color.2 - b) < 0.05 {
+                return preset.name
+            }
+        }
+        return ""
+    }
+}
