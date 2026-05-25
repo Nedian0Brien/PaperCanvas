@@ -31,6 +31,8 @@ struct RootSplitView: View {
     @AppStorage("PaperCanvas.anchorScrapDeletionMode") private var anchorScrapDeletionModeRaw: String = ""
     @State private var leftFraction: CGFloat = 0.5
     @State private var dividerDragStartFraction: CGFloat?
+    @State private var isCanvasOnLeft: Bool = false
+    @State private var showDividerActions: Bool = false
     @State private var loadError: String?
     @State private var didLoadNote = false
     @State private var didLoadCanvas = false
@@ -243,95 +245,158 @@ struct RootSplitView: View {
         GeometryReader { geo in
             let totalWidth = geo.size.width
             let isDraggingDivider = dividerDragStartFraction != nil
-            let isCanvasOnly = hasLeftPaneContent && !isDraggingDivider && leftFraction <= 0
-            let isNoteOnly = hasLeftPaneContent && !isDraggingDivider && leftFraction >= 1
+            let isRightOnly = hasLeftPaneContent && !isDraggingDivider && leftFraction <= 0
+            let isLeftOnly = hasLeftPaneContent && !isDraggingDivider && leftFraction >= 1
             let splitFraction = isDraggingDivider
                 ? max(0, min(1, leftFraction))
                 : max(minFraction, min(maxFraction, leftFraction))
-            let leftWidth = isNoteOnly ? totalWidth : (isCanvasOnly ? 0 : totalWidth * splitFraction)
-            let canvasWidth: CGFloat = {
+            let leftWidth = isLeftOnly ? totalWidth : (isRightOnly ? 0 : totalWidth * splitFraction)
+            let rightWidth: CGFloat = {
                 guard hasLeftPaneContent else { return totalWidth }
-                if isCanvasOnly { return totalWidth }
-                if isNoteOnly { return 0 }
+                if isRightOnly { return totalWidth }
+                if isLeftOnly { return 0 }
                 return max(0, totalWidth - leftWidth)
             }()
             let dividerCenterX = max(dividerHitWidth * 0.5,
                                      min(totalWidth - dividerHitWidth * 0.5,
                                          leftWidth))
+            let leftIsCanvas = isCanvasOnLeft && hasLeftPaneContent
 
             ZStack {
                 HStack(spacing: 0) {
-                    if hasLeftPaneContent && !isCanvasOnly {
-                        ZStack(alignment: .leading) {
-                            leftPane
-                            sideDock(palette: palettePDF, edge: .leading)
+                    if hasLeftPaneContent && !isRightOnly {
+                        if leftIsCanvas {
+                            canvasPaneStack(width: leftWidth, dockEdge: .leading)
+                        } else {
+                            notePaneStack(width: leftWidth, dockEdge: .leading)
                         }
-                        .frame(width: leftWidth)
                     }
 
-                    if !isNoteOnly {
-                        ZStack(alignment: .trailing) {
-                            if activeCanvasPaper == nil {
-                                emptyPaneState(kind: .canvas)
-                            } else {
-                                CanvasView(drawing: $canvasDrawing,
-                                           contentOffset: $contentOffset,
-                                           resetTrigger: $canvasResetTrigger,
-                                           initialContentSize: CGSize(
-                                               width: activeCanvasPaper?.canvasContentWidth ?? 4000,
-                                               height: activeCanvasPaper?.canvasContentHeight ?? 4000),
-                                           scraps: sortedScraps,
-                                           palette: paletteCanvas,
-                                           background: canvasBackground,
-                                           onScrapTap: handleScrapTap,
-                                           onDrop: handleCanvasDrop,
-                                           onScrapMoved: handleScrapMoved,
-                                           onScrapResized: handleScrapResized,
-                                           onScrapEditRequested: beginEditingTextNote,
-                                           onScrapDeleted: handleScrapDeleted,
-                                           onZoomChanged: { scale in
-                                               canvasZoomScale = scale
-                                           },
-                                           onCanvasActivated: {
-                                               activeInputSurface = .canvas
-                                           },
-                                           onPencilTap: handlePencilTap,
-                                           onStrokeBegan: {
-                                               activeInputSurface = .canvas
-                                               paletteCanvas.isStrokeInProgress = true
-                                           },
-                                           onStrokeEnded: {
-                                               paletteCanvas.isStrokeInProgress = false
-                                           })
-                            }
-
-                            sideDock(palette: paletteCanvas, edge: .trailing)
+                    if !isLeftOnly {
+                        if leftIsCanvas {
+                            notePaneStack(width: rightWidth, dockEdge: .trailing)
+                        } else {
+                            canvasPaneStack(width: rightWidth, dockEdge: .trailing)
                         }
-                        .frame(width: canvasWidth)
                     }
                 }
 
-                if isCanvasOnly {
-                    SplitRevealButton(systemImage: "doc.text",
-                                      accessibilityLabel: "노트 펼치기") {
+                if isRightOnly {
+                    let hiddenIsCanvas = leftIsCanvas
+                    SplitRevealButton(systemImage: hiddenIsCanvas ? "square.grid.2x2" : "doc.text",
+                                      accessibilityLabel: hiddenIsCanvas ? "캔버스 펼치기" : "노트 펼치기") {
                         revealSplit()
                     }
                     .position(x: dividerHitWidth * 0.5, y: geo.size.height * 0.5)
-                } else if isNoteOnly {
-                    SplitRevealButton(systemImage: "square.grid.2x2",
-                                      accessibilityLabel: "캔버스 펼치기") {
+                } else if isLeftOnly {
+                    let hiddenIsCanvas = !leftIsCanvas
+                    SplitRevealButton(systemImage: hiddenIsCanvas ? "square.grid.2x2" : "doc.text",
+                                      accessibilityLabel: hiddenIsCanvas ? "캔버스 펼치기" : "노트 펼치기") {
                         revealSplit()
                     }
                     .position(x: totalWidth - dividerHitWidth * 0.5,
                               y: geo.size.height * 0.5)
-                } else if hasLeftPaneContent {
+                } else if hasLeftPaneContent && !showDividerActions {
                     DividerHandle(visualWidth: dividerVisualWidth,
                                   hitWidth: dividerHitWidth)
                         .frame(width: dividerHitWidth)
                         .gesture(dividerDrag(totalWidth: totalWidth))
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                withAnimation(Motion.indirect) {
+                                    showDividerActions = true
+                                }
+                            }
+                        )
                         .position(x: dividerCenterX, y: geo.size.height * 0.5)
+                        .transition(.opacity)
+                }
+
+                if hasLeftPaneContent && showDividerActions && !isLeftOnly && !isRightOnly {
+                    Color.clear
+                        .ignoresSafeArea()
+                        .contentShape(.rect)
+                        .onTapGesture {
+                            withAnimation(Motion.indirect) {
+                                showDividerActions = false
+                            }
+                        }
+
+                    DividerActionsBubble(
+                        onSwap: { swapPanes() },
+                        onMaximizeLeft: { maximizeSide(.leading) },
+                        onMaximizeRight: { maximizeSide(.trailing) }
+                    )
+                    .position(x: dividerCenterX, y: geo.size.height * 0.5)
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func notePaneStack(width: CGFloat, dockEdge: Edge) -> some View {
+        ZStack(alignment: dockEdge == .leading ? .leading : .trailing) {
+            leftPane
+            sideDock(palette: palettePDF, edge: dockEdge)
+        }
+        .frame(width: width)
+    }
+
+    @ViewBuilder
+    private func canvasPaneStack(width: CGFloat, dockEdge: Edge) -> some View {
+        ZStack(alignment: dockEdge == .leading ? .leading : .trailing) {
+            if activeCanvasPaper == nil {
+                emptyPaneState(kind: .canvas)
+            } else {
+                CanvasView(drawing: $canvasDrawing,
+                           contentOffset: $contentOffset,
+                           resetTrigger: $canvasResetTrigger,
+                           initialContentSize: CGSize(
+                               width: activeCanvasPaper?.canvasContentWidth ?? 4000,
+                               height: activeCanvasPaper?.canvasContentHeight ?? 4000),
+                           scraps: sortedScraps,
+                           palette: paletteCanvas,
+                           background: canvasBackground,
+                           onScrapTap: handleScrapTap,
+                           onDrop: handleCanvasDrop,
+                           onScrapMoved: handleScrapMoved,
+                           onScrapResized: handleScrapResized,
+                           onScrapEditRequested: beginEditingTextNote,
+                           onScrapDeleted: handleScrapDeleted,
+                           onZoomChanged: { scale in
+                               canvasZoomScale = scale
+                           },
+                           onCanvasActivated: {
+                               activeInputSurface = .canvas
+                           },
+                           onPencilTap: handlePencilTap,
+                           onStrokeBegan: {
+                               activeInputSurface = .canvas
+                               paletteCanvas.isStrokeInProgress = true
+                           },
+                           onStrokeEnded: {
+                               paletteCanvas.isStrokeInProgress = false
+                           })
+            }
+
+            sideDock(palette: paletteCanvas, edge: dockEdge)
+        }
+        .frame(width: width)
+    }
+
+    private func swapPanes() {
+        withAnimation(Motion.indirect) {
+            isCanvasOnLeft.toggle()
+            leftFraction = 1 - leftFraction
+            showDividerActions = false
+        }
+    }
+
+    private func maximizeSide(_ edge: Edge) {
+        withAnimation(Motion.indirect) {
+            leftFraction = edge == .leading ? 1 : 0
+            showDividerActions = false
         }
     }
 
@@ -1364,6 +1429,61 @@ private struct DividerHandle: View {
         .frame(width: hitWidth)
         .contentShape(.rect)
         .hoverEffect(.lift)
+    }
+}
+
+private struct DividerActionsBubble: View {
+    let onSwap: () -> Void
+    let onMaximizeLeft: () -> Void
+    let onMaximizeRight: () -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            BubbleActionButton(
+                systemImage: "rectangle.lefthalf.inset.filled",
+                accessibilityLabel: "좌측 최대화",
+                action: onMaximizeLeft
+            )
+            Rectangle()
+                .fill(Color.Rule.hairline)
+                .frame(width: 0.5, height: 24)
+            BubbleActionButton(
+                systemImage: "arrow.left.arrow.right",
+                accessibilityLabel: "좌우 교체",
+                action: onSwap
+            )
+            Rectangle()
+                .fill(Color.Rule.hairline)
+                .frame(width: 0.5, height: 24)
+            BubbleActionButton(
+                systemImage: "rectangle.righthalf.inset.filled",
+                accessibilityLabel: "우측 최대화",
+                action: onMaximizeRight
+            )
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .chromeGlassCapsule()
+        .fixedSize()
+    }
+}
+
+private struct BubbleActionButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color.Ink.primary)
+                .frame(width: 40, height: 40)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .hoverEffect(.lift)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
