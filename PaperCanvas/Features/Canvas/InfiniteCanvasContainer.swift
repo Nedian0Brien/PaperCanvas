@@ -409,13 +409,13 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
                 center = CGPoint(x: contentBounds.midX, y: contentBounds.midY)
             }
 
-            let rawX = center.x - viewport.width / 2
-            let rawY = center.y - viewport.height / 2
-            let maxX = max(0, contentSize.width - viewport.width)
-            let maxY = max(0, contentSize.height - viewport.height)
+            let zoom = max(canvas.zoomScale, 0.0001)
+            let rawX = center.x * zoom - viewport.width / 2
+            let rawY = center.y * zoom - viewport.height / 2
+            let maxOffset = maxContentOffset(for: canvas)
             return CGPoint(
-                x: min(maxX, max(0, rawX)),
-                y: min(maxY, max(0, rawY))
+                x: min(maxOffset.x, max(0, rawX)),
+                y: min(maxOffset.y, max(0, rawY))
             )
         }
 
@@ -1387,16 +1387,25 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         }
 
         private func clampContentOffset(_ canvas: PKCanvasView) {
-            let maxX = max(0, canvas.contentSize.width - canvas.bounds.width)
-            let maxY = max(0, canvas.contentSize.height - canvas.bounds.height)
+            let maxOffset = maxContentOffset(for: canvas)
             let clamped = CGPoint(
-                x: min(maxX, max(0, canvas.contentOffset.x)),
-                y: min(maxY, max(0, canvas.contentOffset.y))
+                x: min(maxOffset.x, max(0, canvas.contentOffset.x)),
+                y: min(maxOffset.y, max(0, canvas.contentOffset.y))
             )
             if clamped != canvas.contentOffset {
                 canvas.setContentOffset(clamped, animated: false)
                 parent.contentOffset = clamped
             }
+        }
+
+        private func maxContentOffset(for canvas: PKCanvasView) -> CGPoint {
+            let zoom = max(canvas.zoomScale, 0.0001)
+            let scaledContentSize = CGSize(width: canvas.contentSize.width * zoom,
+                                           height: canvas.contentSize.height * zoom)
+            return CGPoint(
+                x: max(0, scaledContentSize.width - canvas.bounds.width),
+                y: max(0, scaledContentSize.height - canvas.bounds.height)
+            )
         }
 
         /// Translate the entire scene — drawing, scrap models, and scroll
