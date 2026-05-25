@@ -113,6 +113,20 @@ final class ScrapOverlayView: UIView, UIGestureRecognizerDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
+    /// The resize handles and context-menu bubble live as subviews positioned
+    /// outside `bounds`. UIKit's default hit-testing won't route touches there
+    /// because `point(inside:)` returns false for out-of-bounds points. Extend
+    /// hit detection to include any visible affordance.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if bounds.contains(point) { return true }
+        for handle in handleViews where !handle.isHidden {
+            if handle.frame.insetBy(dx: -8, dy: -8).contains(point) { return true }
+        }
+        if let menu = contextMenuContainer, !menu.isHidden,
+           menu.frame.contains(point) { return true }
+        return false
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         attachHostingControllerIfNeeded()
