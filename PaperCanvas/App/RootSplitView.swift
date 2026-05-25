@@ -1438,7 +1438,7 @@ private struct DividerActionsBubble: View {
     let onMaximizeRight: () -> Void
 
     var body: some View {
-        HStack(spacing: 2) {
+        VStack(spacing: 2) {
             BubbleActionButton(
                 systemImage: "rectangle.lefthalf.inset.filled",
                 accessibilityLabel: "좌측 최대화",
@@ -1446,7 +1446,7 @@ private struct DividerActionsBubble: View {
             )
             Rectangle()
                 .fill(Color.Rule.hairline)
-                .frame(width: 0.5, height: 24)
+                .frame(width: 24, height: 0.5)
             BubbleActionButton(
                 systemImage: "arrow.left.arrow.right",
                 accessibilityLabel: "좌우 교체",
@@ -1454,16 +1454,16 @@ private struct DividerActionsBubble: View {
             )
             Rectangle()
                 .fill(Color.Rule.hairline)
-                .frame(width: 0.5, height: 24)
+                .frame(width: 24, height: 0.5)
             BubbleActionButton(
                 systemImage: "rectangle.righthalf.inset.filled",
                 accessibilityLabel: "우측 최대화",
                 action: onMaximizeRight
             )
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .chromeGlassCapsule()
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .chromeGlassRect(cornerRadius: 24)
         .fixedSize()
     }
 }
