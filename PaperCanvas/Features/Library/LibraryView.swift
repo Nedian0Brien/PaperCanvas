@@ -618,11 +618,7 @@ struct LibraryView: View {
                     Label("정렬", systemImage: "arrow.up.arrow.down")
                 }
 
-                newNoteMenu(label: "새 노트", systemImage: "doc.text")
-
-                Button(action: createBlankCanvas) {
-                    Label("새 캔버스", systemImage: "rectangle.on.rectangle")
-                }
+                newDocumentMenu
 
                 Button {
                     showingFilePicker = true
@@ -653,6 +649,30 @@ struct LibraryView: View {
             Label(label, systemImage: systemImage)
         }
         .accessibilityLabel(label)
+    }
+
+    @ViewBuilder
+    private var newDocumentMenu: some View {
+        Menu {
+            Menu {
+                ForEach(NotePageStyle.allCases) { style in
+                    Button {
+                        createBlankNote(style: style)
+                    } label: {
+                        Label(style.label, systemImage: style.systemImage)
+                    }
+                }
+            } label: {
+                Label("새 노트", systemImage: "doc.text")
+            }
+
+            Button(action: createBlankCanvas) {
+                Label("새 캔버스", systemImage: "rectangle.on.rectangle")
+            }
+        } label: {
+            Label("새로 만들기", systemImage: "plus")
+        }
+        .accessibilityLabel("새로 만들기")
     }
 
     private var paperRenamePresented: Binding<Bool> {

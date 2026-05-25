@@ -454,10 +454,30 @@ struct PDFKitView: UIViewRepresentable {
             presentAnchorContextMenu(for: anchor)
         }
 
+        private func convertPDFPageRectToWrapper(pageRect: CGRect, pageIndex: Int) -> CGRect? {
+            guard let pdfView = hostPDFView,
+                  let document = pdfView.document,
+                  pageIndex >= 0, pageIndex < document.pageCount,
+                  let page = document.page(at: pageIndex),
+                  let wrapper else { return nil }
+            // anchor.pageRect uses PDF page coords (y-up); the top of the page
+            // is maxY. Convert two diagonal corners through PDFKit so we land
+            // in the wrapper's view space regardless of zoom / scroll.
+            let topLeft = pdfView.convert(CGPoint(x: pageRect.minX, y: pageRect.maxY), from: page)
+            let bottomRight = pdfView.convert(CGPoint(x: pageRect.maxX, y: pageRect.minY), from: page)
+            let pdfViewRect = CGRect(
+                x: min(topLeft.x, bottomRight.x),
+                y: min(topLeft.y, bottomRight.y),
+                width: abs(bottomRight.x - topLeft.x),
+                height: abs(bottomRight.y - topLeft.y)
+            )
+            return pdfView.convert(pdfViewRect, to: wrapper)
+        }
+
         private func presentAnchorContextMenu(for anchor: AnchorRef) {
             guard let wrapper,
-                  let sourceRect = convertPageRectToWrapper(pageBounds: anchor.pageRect,
-                                                             pageIndex: anchor.pageIndex) else { return }
+                  let sourceRect = convertPDFPageRectToWrapper(pageRect: anchor.pageRect,
+                                                                pageIndex: anchor.pageIndex) else { return }
             let actions = AnchorContextMenuActions(
                 kind: anchor.kind,
                 hasLinkedScrap: parent.onAnchorHasLinkedScrap?(anchor) ?? false,
