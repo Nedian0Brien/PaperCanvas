@@ -178,7 +178,7 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         context.coordinator.handleResetIfNeeded(canvas)
         context.coordinator.handleUndoRedoIfNeeded(canvas)
         context.coordinator.applyExternalOffsetIfNeeded(canvas)
-        context.coordinator.recomputeActiveBounds(canvas)
+        context.coordinator.recomputeActiveBoundsIfStable(canvas)
     }
 
     @MainActor
@@ -1332,6 +1332,12 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         /// bounding box. When the region would extend into negative canvas
         /// coordinates the entire scene (strokes + scraps + scroll offset)
         /// is translated so the active rect always starts at the origin.
+        func recomputeActiveBoundsIfStable(_ canvas: PKCanvasView) {
+            guard !canvas.isZooming,
+                  !canvas.isZoomBouncing else { return }
+            recomputeActiveBounds(canvas)
+        }
+
         func recomputeActiveBounds(_ canvas: PKCanvasView) {
             guard !isRecomputingActiveBounds else { return }
             isRecomputingActiveBounds = true
