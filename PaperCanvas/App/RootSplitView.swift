@@ -452,7 +452,8 @@ struct RootSplitView: View {
             notePageCount: max(1, activeNotePaper?.notePageCount ?? 1),
             onAddNotePage: addBlankNotePage,
             onPickNotePageStyle: setBlankNotePageStyle,
-            debugActions: debugActions
+            debugActions: debugActions,
+            isCanvasOnLeft: isCanvasOnLeft && hasLeftPaneContent
         )
         .padding(.horizontal, TopBarMetrics.outerHorizontalPadding)
         .padding(.top, TopBarMetrics.outerTopPadding)

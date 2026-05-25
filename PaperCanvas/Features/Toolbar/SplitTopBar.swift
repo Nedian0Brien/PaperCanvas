@@ -44,6 +44,8 @@ struct SplitTopBar: View {
 
     var debugActions: DebugActions?
 
+    var isCanvasOnLeft: Bool = false
+
     struct DebugActions {
         let addTextScrap: () -> Void
         let addImageScrap: () -> Void
@@ -56,12 +58,34 @@ struct SplitTopBar: View {
     var body: some View {
         ChromeGlassContainer(spacing: 8) {
             HStack(spacing: 8) {
-                leadingCluster
+                libraryButton
+                if isCanvasOnLeft {
+                    canvasIdentity(panelAlignment: .topLeading)
+                } else {
+                    noteIdentity(panelAlignment: .topLeading)
+                }
                 Spacer(minLength: 0)
-                trailingCluster
+                if isCanvasOnLeft {
+                    noteIdentity(panelAlignment: .topTrailing)
+                } else {
+                    canvasIdentity(panelAlignment: .topTrailing)
+                }
             }
         }
         .frame(maxWidth: .infinity, minHeight: TopBarMetrics.barHeight)
+    }
+
+    @ViewBuilder
+    private var libraryButton: some View {
+        Button(action: onLibraryTap) {
+            Image(systemName: "books.vertical")
+                .font(AppType.toolGlyph)
+                .frame(width: TopBarMetrics.buttonSize,
+                       height: TopBarMetrics.buttonSize)
+                .contentShape(Rectangle())
+        }
+        .chromeGlassButtonStyle()
+        .accessibilityLabel("라이브러리")
     }
 
     /// Frame morph between the title capsule and the expanded panel is driven by
@@ -82,33 +106,16 @@ struct SplitTopBar: View {
         .chromeInteractiveGlassRect(cornerRadius: Radius.xl)
     }
 
-    // MARK: - Leading: library + note identity
+    // MARK: - Note identity
 
     @ViewBuilder
-    private var leadingCluster: some View {
-        HStack(spacing: 8) {
-            Button(action: onLibraryTap) {
-                Image(systemName: "books.vertical")
-                    .font(AppType.toolGlyph)
-                    .frame(width: TopBarMetrics.buttonSize,
-                           height: TopBarMetrics.buttonSize)
-                    .contentShape(Rectangle())
-            }
-            .chromeGlassButtonStyle()
-            .accessibilityLabel("라이브러리")
-
-            noteIdentity
-        }
-    }
-
-    @ViewBuilder
-    private var noteIdentity: some View {
+    private func noteIdentity(panelAlignment: Alignment) -> some View {
         Group {
             if documentSwitcherKind == .note {
                 noteIdentityContent
                     .opacity(0)
                     .accessibilityHidden(true)
-                    .overlay(alignment: .topLeading) {
+                    .overlay(alignment: panelAlignment) {
                         morphedPanel(for: .note)
                             .matchedGeometryEffect(id: DocumentSwitcherGlassID.note,
                                                    in: documentSwitcherNamespace)
@@ -217,23 +224,23 @@ struct SplitTopBar: View {
         .frame(minHeight: TopBarMetrics.buttonSize)
     }
 
-    // MARK: - Trailing: canvas identity
+    // MARK: - Canvas identity
 
     @ViewBuilder
-    private var trailingCluster: some View {
+    private func canvasIdentity(panelAlignment: Alignment) -> some View {
         Group {
             if documentSwitcherKind == .canvas {
-                trailingClusterContent
+                canvasIdentityContent
                     .opacity(0)
                     .accessibilityHidden(true)
-                    .overlay(alignment: .topTrailing) {
+                    .overlay(alignment: panelAlignment) {
                         morphedPanel(for: .canvas)
                             .matchedGeometryEffect(id: DocumentSwitcherGlassID.canvas,
                                                    in: documentSwitcherNamespace)
                             .fixedSize()
                     }
             } else {
-                trailingClusterContent
+                canvasIdentityContent
                     .chromeInteractiveGlassCapsule()
                     .matchedGeometryEffect(id: DocumentSwitcherGlassID.canvas,
                                            in: documentSwitcherNamespace)
@@ -243,7 +250,7 @@ struct SplitTopBar: View {
     }
 
     @ViewBuilder
-    private var trailingClusterContent: some View {
+    private var canvasIdentityContent: some View {
         HStack(spacing: 4) {
             Button {
                 onToggleDocumentSwitcher(.canvas)
