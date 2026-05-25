@@ -32,7 +32,7 @@ struct CanvasView: View {
                                     tool: palette.pkTool,
                                     toolKind: palette.tool,
                                     lassoMode: palette.lassoMode,
-                                    prefersNativeToolRendering: palette.tool == .eraser || palette.tool == .lasso,
+                                    prefersNativeToolRendering: true,
                                     undoTrigger: palette.undoTrigger,
                                     redoTrigger: palette.redoTrigger,
                                     isMainCanvasActive: palette.lastActiveCanvas == .main,

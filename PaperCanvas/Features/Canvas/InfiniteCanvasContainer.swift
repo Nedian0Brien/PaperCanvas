@@ -242,13 +242,23 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         }
 
         func syncRendererFromCanvas(_ canvas: PKCanvasView) {
+            guard !parent.prefersNativeToolRendering else {
+                inkMetalView?.inkRenderer.setStrokes([])
+                inkMetalView?.inkRenderer.setInProgress(nil)
+                return
+            }
             inkMetalView?.inkRenderer.setStrokes(PKDrawingConverter.toInkStrokes(canvas.drawing))
             inkMetalView?.inkRenderer.setInProgress(nil)
             inkMetalView?.setNeedsDisplay()
         }
 
         func syncInkOverlayVisibility() {
-            inkMetalView?.isHidden = parent.prefersNativeToolRendering
+            let usesNativeToolRendering = parent.prefersNativeToolRendering
+            inkMetalView?.isHidden = usesNativeToolRendering
+            if usesNativeToolRendering {
+                inkMetalView?.inkRenderer.setStrokes([])
+                inkMetalView?.inkRenderer.setInProgress(nil)
+            }
         }
 
         private var wasRectangleLassoActive: Bool = false
@@ -506,7 +516,8 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             guard !isApplyingExternalDrawing else { return }
             if isUserDrawing {
-                if let last = canvasView.drawing.strokes.last,
+                if !parent.prefersNativeToolRendering,
+                   let last = canvasView.drawing.strokes.last,
                    let inkStroke = PKDrawingConverter.convert(last) {
                     inkMetalView?.inkRenderer.setInProgress(inkStroke)
                     inkMetalView?.setNeedsDisplay()
