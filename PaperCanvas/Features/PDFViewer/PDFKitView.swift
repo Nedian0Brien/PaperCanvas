@@ -475,8 +475,7 @@ struct PDFKitView: UIViewRepresentable {
         }
 
         private func presentAnchorContextMenu(for anchor: AnchorRef) {
-            guard let wrapper,
-                  let sourceRect = convertPDFPageRectToWrapper(pageRect: anchor.pageRect,
+            guard let sourceRect = convertPDFPageRectToWrapper(pageRect: anchor.pageRect,
                                                                 pageIndex: anchor.pageIndex) else { return }
             let actions = AnchorContextMenuActions(
                 kind: anchor.kind,

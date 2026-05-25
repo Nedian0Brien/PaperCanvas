@@ -65,7 +65,8 @@ final class PaperDocument {
          bookmarkData: Data? = nil,
          sourceURLString: String? = nil,
          notePageStyle: NotePageStyle = .lined,
-         notePageCount: Int = 1) {
+         notePageCount: Int = 1,
+         canvasBackground: CanvasBackground = .dots) {
         self.id = UUID()
         self.title = title
         self.documentKindRawValue = kind.rawValue
@@ -78,7 +79,7 @@ final class PaperDocument {
         self.canvasContentHeight = 4000
         self.drawingData = nil
         self.pdfInkData = nil
-        self.canvasBackgroundRaw = "dots"
+        self.canvasBackgroundRaw = canvasBackground.rawValue
         self.notePageStyleRaw = notePageStyle.rawValue
         self.notePageCount = max(1, notePageCount)
         self.notePageWidth = Double(NotePageStyle.defaultPageSize.width)

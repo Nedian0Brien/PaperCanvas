@@ -387,9 +387,7 @@ struct LibraryView: View {
         } actions: {
             HStack(spacing: Spacing.m) {
                 newNoteMenu(label: "새 노트", systemImage: "doc.text")
-                Button(action: createBlankCanvas) {
-                    Label("새 캔버스", systemImage: "rectangle.on.rectangle")
-                }
+                newCanvasMenu(label: "새 캔버스", systemImage: "rectangle.on.rectangle")
                 Button {
                     showingFilePicker = true
                 } label: {
@@ -415,9 +413,8 @@ struct LibraryView: View {
                 HStack(spacing: Spacing.m) {
                     newNoteMenu(label: "이 폴더에 새 노트",
                                 systemImage: "doc.text")
-                    Button(action: createBlankCanvas) {
-                        Label("이 폴더에 새 캔버스", systemImage: "rectangle.on.rectangle")
-                    }
+                    newCanvasMenu(label: "이 폴더에 새 캔버스",
+                                  systemImage: "rectangle.on.rectangle")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -666,13 +663,41 @@ struct LibraryView: View {
                 Label("새 노트", systemImage: "doc.text")
             }
 
-            Button(action: createBlankCanvas) {
+            Menu {
+                ForEach(creatableCanvasBackgrounds) { background in
+                    Button {
+                        createBlankCanvas(background: background)
+                    } label: {
+                        Label(background.label, systemImage: background.systemImage)
+                    }
+                }
+            } label: {
                 Label("새 캔버스", systemImage: "rectangle.on.rectangle")
             }
         } label: {
             Label("새로 만들기", systemImage: "plus")
         }
         .accessibilityLabel("새로 만들기")
+    }
+
+    @ViewBuilder
+    private func newCanvasMenu(label: String, systemImage: String) -> some View {
+        Menu {
+            ForEach(creatableCanvasBackgrounds) { background in
+                Button {
+                    createBlankCanvas(background: background)
+                } label: {
+                    Label(background.label, systemImage: background.systemImage)
+                }
+            }
+        } label: {
+            Label(label, systemImage: systemImage)
+        }
+        .accessibilityLabel(label)
+    }
+
+    private var creatableCanvasBackgrounds: [CanvasBackground] {
+        [.grid, .lines, .dots]
     }
 
     private var paperRenamePresented: Binding<Bool> {
@@ -749,8 +774,10 @@ struct LibraryView: View {
         return activeFolders.first { $0.id == folderID }
     }
 
-    private func createBlankCanvas() {
-        let paper = PaperDocument(title: nextBlankTitle(base: "새 캔버스"), kind: .canvas)
+    private func createBlankCanvas(background: CanvasBackground = .dots) {
+        let paper = PaperDocument(title: nextBlankTitle(base: "새 캔버스"),
+                                  kind: .canvas,
+                                  canvasBackground: background)
         if let folder = selectedFolder() {
             paper.folder = folder
             folder.updatedAt = .now
