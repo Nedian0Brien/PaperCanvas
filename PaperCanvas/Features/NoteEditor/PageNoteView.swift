@@ -23,44 +23,30 @@ struct PageNoteView: View {
     var onAddPageRequested: (() -> Void)? = nil
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            PageNoteScrollView(
-                drawing: $drawing,
-                pageStyle: pageStyle,
-                pageCount: pageCount,
-                pageSize: pageSize,
-                tool: palette.pkTool,
-                toolKind: palette.tool,
-                isMarkupActive: palette.lastActiveCanvas == .pdfInk,
-                isSplitResizing: isSplitResizing,
-                undoTrigger: palette.undoTrigger,
-                redoTrigger: palette.redoTrigger,
-                onActivated: {
-                    palette.lastActiveCanvas = .pdfInk
-                    onPageNoteActivated?()
-                },
-                onStrokeBegan: onStrokeBegan,
-                onStrokeEnded: onStrokeEnded,
-                onPencilTap: onPencilTap,
-                onUndoRedoStateChanged: { canUndo, canRedo in
-                    palette.pdfCanUndo = canUndo
-                    palette.pdfCanRedo = canRedo
-                }
-            )
-
-            if let onAddPageRequested {
-                Button(action: onAddPageRequested) {
-                    Label("페이지 추가", systemImage: "plus.rectangle.on.rectangle")
-                        .font(AppType.callout.weight(.semibold))
-                        .padding(.horizontal, Spacing.m)
-                        .padding(.vertical, Spacing.s)
-                }
-                .buttonStyle(.borderedProminent)
-                .chromeGlassCapsule()
-                .padding(Spacing.l)
-                .accessibilityLabel("페이지 추가")
+        PageNoteScrollView(
+            drawing: $drawing,
+            pageStyle: pageStyle,
+            pageCount: pageCount,
+            pageSize: pageSize,
+            tool: palette.pkTool,
+            toolKind: palette.tool,
+            isMarkupActive: palette.lastActiveCanvas == .pdfInk,
+            isSplitResizing: isSplitResizing,
+            undoTrigger: palette.undoTrigger,
+            redoTrigger: palette.redoTrigger,
+            onActivated: {
+                palette.lastActiveCanvas = .pdfInk
+                onPageNoteActivated?()
+            },
+            onStrokeBegan: onStrokeBegan,
+            onStrokeEnded: onStrokeEnded,
+            onPencilTap: onPencilTap,
+            onAddPageRequested: onAddPageRequested,
+            onUndoRedoStateChanged: { canUndo, canRedo in
+                palette.pdfCanUndo = canUndo
+                palette.pdfCanRedo = canRedo
             }
-        }
+        )
     }
 }
 
@@ -81,6 +67,7 @@ private struct PageNoteScrollView: UIViewRepresentable {
     let onStrokeBegan: (() -> Void)?
     let onStrokeEnded: (() -> Void)?
     let onPencilTap: (() -> Void)?
+    let onAddPageRequested: (() -> Void)?
     let onUndoRedoStateChanged: (Bool, Bool) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -123,6 +110,7 @@ private struct PageNoteScrollView: UIViewRepresentable {
         private var lastLayoutPageCount: Int?
         private var lastLayoutPageSize: CGSize?
         private var lastLayoutContentSize: CGSize?
+        private var lastAutoExpandedPageCount: Int?
 
         init(_ parent: PageNoteScrollView) {
             self.parent = parent
@@ -290,6 +278,7 @@ private struct PageNoteScrollView: UIViewRepresentable {
             guard !suppressDrawingPropagation else { return }
             let data = canvasView.drawing.dataRepresentation()
             lastAppliedDrawingData = data
+            requestPageIfNeeded(for: canvasView.drawing)
             DispatchQueue.main.async { [parent] in
                 parent.drawing = canvasView.drawing
                 parent.onUndoRedoStateChanged(canvasView.undoManager?.canUndo ?? false,
@@ -304,6 +293,28 @@ private struct PageNoteScrollView: UIViewRepresentable {
 
         func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
             parent.onStrokeEnded?()
+        }
+
+        private func requestPageIfNeeded(for drawing: PKDrawing) {
+            guard parent.onAddPageRequested != nil else { return }
+            let count = max(1, parent.pageCount)
+            guard lastAutoExpandedPageCount != count else { return }
+
+            let gap: CGFloat = 24
+            let lastPageOriginY = CGFloat(count - 1) * (parent.pageSize.height + gap)
+            let lastPageRect = CGRect(x: 0,
+                                      y: lastPageOriginY,
+                                      width: parent.pageSize.width,
+                                      height: parent.pageSize.height)
+            let hasInkOnLastPage = drawing.strokes.contains { stroke in
+                stroke.renderBounds.intersects(lastPageRect)
+            }
+            guard hasInkOnLastPage else { return }
+
+            lastAutoExpandedPageCount = count
+            DispatchQueue.main.async { [parent] in
+                parent.onAddPageRequested?()
+            }
         }
 
         // MARK: UIScrollViewDelegate (zoom)
@@ -356,9 +367,9 @@ final class PageNoteHostView: UIView {
               scrollView.bounds.width > 0,
               content.bounds.width > 0 else { return }
 
-        let horizontalBreathingRoom: CGFloat = 32
+        let horizontalBreathingRoom = Spacing.s
         let availableWidth = max(1, scrollView.bounds.width - horizontalBreathingRoom)
-        let fitScale = max(0.2, min(1, availableWidth / content.bounds.width))
+        let fitScale = max(0.2, min(scrollView.maximumZoomScale, availableWidth / content.bounds.width))
 
         if abs(scrollView.minimumZoomScale - fitScale) > 0.001 {
             scrollView.minimumZoomScale = fitScale
