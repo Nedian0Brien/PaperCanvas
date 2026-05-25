@@ -123,6 +123,14 @@ struct RootSplitView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             topBar
         }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                withAnimation(Motion.indirect) {
+                    showDividerActions = false
+                }
+            },
+            including: showDividerActions ? .all : .none
+        )
         .sheet(isPresented: $showingPageJumpSheet) {
             if let pdfDocument {
                 PageJumpSheet(
@@ -326,12 +334,7 @@ struct RootSplitView: View {
                     DividerActionsBubble(
                         onSwap: { swapPanes() },
                         onMaximizeLeft: { maximizeSide(.leading) },
-                        onMaximizeRight: { maximizeSide(.trailing) },
-                        onDismiss: {
-                            withAnimation(Motion.indirect) {
-                                showDividerActions = false
-                            }
-                        }
+                        onMaximizeRight: { maximizeSide(.trailing) }
                     )
                     .position(x: dividerCenterX, y: geo.size.height * 0.5)
                     .transition(.scale(scale: 0.85).combined(with: .opacity))
@@ -1443,7 +1446,6 @@ private struct DividerActionsBubble: View {
     let onSwap: () -> Void
     let onMaximizeLeft: () -> Void
     let onMaximizeRight: () -> Void
-    let onDismiss: () -> Void
 
     var body: some View {
         VStack(spacing: 2) {
@@ -1467,14 +1469,6 @@ private struct DividerActionsBubble: View {
                 systemImage: "rectangle.righthalf.inset.filled",
                 accessibilityLabel: "우측 최대화",
                 action: onMaximizeRight
-            )
-            Rectangle()
-                .fill(Color.Rule.hairline)
-                .frame(width: 24, height: 0.5)
-            BubbleActionButton(
-                systemImage: "xmark",
-                accessibilityLabel: "닫기",
-                action: onDismiss
             )
         }
         .padding(.horizontal, 4)
