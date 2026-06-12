@@ -1450,13 +1450,21 @@ struct PDFKitView: UIViewRepresentable {
             var transform = pageSpaceToViewTransform(page: page, pdfView: pdfView)
             guard let viewPath = pagePath.copy(using: &transform) else { return nil }
             let isMarker = stroke.tool == .marker || stroke.tool == .highlighter
+            let viewSamples = stroke.points.map { point in
+                RenderedPDFInkSample(
+                    location: point.location.applying(transform),
+                    force: point.force,
+                    altitude: point.altitude
+                )
+            }
             return RenderedPDFInkStroke(
                 path: viewPath,
                 color: stroke.color.uiColor,
                 blendMode: isMarker || stroke.tool == .pencil ? .multiply : .normal,
                 opacity: opacity,
                 tool: stroke.tool,
-                baseWidth: stroke.baseWidth
+                baseWidth: stroke.baseWidth,
+                samples: viewSamples
             )
         }
 
@@ -1916,6 +1924,12 @@ private final class PaperCanvasPDFView: PDFView {
     }
 }
 
+private struct RenderedPDFInkSample {
+    var location: CGPoint
+    var force: CGFloat
+    var altitude: CGFloat
+}
+
 private struct RenderedPDFInkStroke {
     var path: CGPath
     var color: UIColor
@@ -1923,6 +1937,7 @@ private struct RenderedPDFInkStroke {
     var opacity: CGFloat
     var tool: InkTool
     var baseWidth: CGFloat
+    var samples: [RenderedPDFInkSample]
 }
 
 private enum RenderedPDFInkLasso {
@@ -1988,42 +2003,116 @@ private final class PDFInkRenderView: UIView {
     }
 
     private func drawPencilStroke(_ stroke: RenderedPDFInkStroke, in context: CGContext) {
-        let bounds = stroke.path.boundingBoxOfPath.insetBy(dx: -2, dy: -2)
-        guard bounds.minX.isFinite,
-              bounds.minY.isFinite,
-              bounds.width.isFinite,
-              bounds.height.isFinite,
-              !bounds.isEmpty else { return }
-
-        context.saveGState()
-        context.setBlendMode(.multiply)
-        context.setAlpha(stroke.opacity * 0.46)
-        context.setFillColor(stroke.color.cgColor)
-        context.addPath(stroke.path)
-        context.fillPath()
-        context.restoreGState()
+        guard stroke.samples.count > 1 else {
+            drawPencilFallback(stroke, in: context)
+            return
+        }
 
         context.saveGState()
         context.addPath(stroke.path)
         context.clip()
         context.setBlendMode(.multiply)
-        context.setStrokeColor(stroke.color.withAlphaComponent(stroke.opacity * 0.18).cgColor)
-        context.setLineWidth(max(0.35, min(stroke.baseWidth * 0.18, 1.2)))
         context.setLineCap(.round)
+        context.setLineJoin(.round)
 
-        let spacing = max(1.4, min(stroke.baseWidth * 0.65, 4.2))
-        let diagonalSpan = bounds.width + bounds.height
-        var y = bounds.minY - bounds.width
-        var index = 0
-        while y <= bounds.maxY + bounds.width {
-            let jitter = CGFloat((index * 37) % 11) * 0.13
-            context.move(to: CGPoint(x: bounds.minX - 4, y: y + jitter))
-            context.addLine(to: CGPoint(x: bounds.minX + diagonalSpan, y: y + diagonalSpan + jitter))
-            y += spacing
-            index += 1
+        for pass in 0..<3 {
+            let passAlpha = stroke.opacity * (pass == 0 ? 0.20 : 0.12)
+            context.setStrokeColor(stroke.color.withAlphaComponent(passAlpha).cgColor)
+            drawPencilCenterline(stroke, pass: pass, in: context)
         }
-        context.strokePath()
+
+        context.setFillColor(stroke.color.withAlphaComponent(stroke.opacity * 0.16).cgColor)
+        drawPencilGrain(stroke, in: context)
         context.restoreGState()
+    }
+
+    private func drawPencilFallback(_ stroke: RenderedPDFInkStroke, in context: CGContext) {
+        context.saveGState()
+        context.setBlendMode(.multiply)
+        context.setAlpha(stroke.opacity * 0.34)
+        context.setFillColor(stroke.color.cgColor)
+        context.addPath(stroke.path)
+        context.fillPath()
+        context.restoreGState()
+    }
+
+    private func drawPencilCenterline(_ stroke: RenderedPDFInkStroke,
+                                      pass: Int,
+                                      in context: CGContext) {
+        let samples = stroke.samples
+        guard let first = samples.first else { return }
+        let passOffset = CGFloat(pass - 1) * max(0.28, min(stroke.baseWidth * 0.10, 0.9))
+        context.setLineWidth(max(0.28, min(stroke.baseWidth * (0.16 + CGFloat(pass) * 0.035), 1.15)))
+        context.beginPath()
+        context.move(to: jitteredPencilPoint(first.location,
+                                             index: 0,
+                                             pass: pass,
+                                             normal: .zero,
+                                             offset: passOffset))
+
+        var drewSegment = false
+        for index in samples.indices.dropFirst() {
+            let previous = samples[index - 1]
+            let current = samples[index]
+            let tangent = CGPoint(x: current.location.x - previous.location.x,
+                                  y: current.location.y - previous.location.y)
+            let length = max(hypot(tangent.x, tangent.y), 0.001)
+            let normal = CGPoint(x: -tangent.y / length, y: tangent.x / length)
+            let point = jitteredPencilPoint(current.location,
+                                            index: index,
+                                            pass: pass,
+                                            normal: normal,
+                                            offset: passOffset)
+            if (index + pass) % 13 == 0 {
+                context.strokePath()
+                context.beginPath()
+                context.move(to: point)
+            } else {
+                context.addLine(to: point)
+                drewSegment = true
+            }
+        }
+        if drewSegment {
+            context.strokePath()
+        }
+    }
+
+    private func drawPencilGrain(_ stroke: RenderedPDFInkStroke, in context: CGContext) {
+        let samples = stroke.samples
+        let radius = max(0.8, min(stroke.baseWidth * 0.55, 5.5))
+        let dotSize = max(0.35, min(stroke.baseWidth * 0.10, 0.9))
+        for index in samples.indices {
+            guard index % 2 == 0 else { continue }
+            let sample = samples[index]
+            let pressure = max(0.15, min(sample.force, 1))
+            let dotCount = max(1, min(Int(stroke.baseWidth * pressure * 1.4), 8))
+            for dot in 0..<dotCount {
+                let seed = CGFloat(((index + 1) * 73 + dot * 29) % 101) / 100
+                let seed2 = CGFloat(((index + 1) * 41 + dot * 53) % 101) / 100
+                let angle = seed * CGFloat.pi * 2
+                let distance = (seed2 - 0.5) * radius * 2
+                let center = CGPoint(
+                    x: sample.location.x + cos(angle) * distance,
+                    y: sample.location.y + sin(angle) * distance
+                )
+                let size = dotSize * (0.75 + seed * 0.7)
+                context.fillEllipse(in: CGRect(x: center.x - size * 0.5,
+                                               y: center.y - size * 0.5,
+                                               width: size,
+                                               height: size))
+            }
+        }
+    }
+
+    private func jitteredPencilPoint(_ point: CGPoint,
+                                     index: Int,
+                                     pass: Int,
+                                     normal: CGPoint,
+                                     offset: CGFloat) -> CGPoint {
+        let seed = CGFloat(((index + 1) * 31 + pass * 17) % 19) / 18 - 0.5
+        let jitter = seed * 0.7 + offset
+        return CGPoint(x: point.x + normal.x * jitter,
+                       y: point.y + normal.y * jitter)
     }
 
     private func drawSelectionRects(in context: CGContext) {
