@@ -412,8 +412,7 @@ struct PaletteToolbar: View {
                 WidthSlotEditor(
                     width: widthBinding(for: index),
                     range: palette.activeWidthRange,
-                    color: widthPreviewColor,
-                    presetSteps: palette.activeWidthPresetSteps
+                    color: widthPreviewColor
                 )
                 .padding(14)
                 .presentationCompactAdaptation(.popover)
@@ -438,8 +437,7 @@ struct PaletteToolbar: View {
                 WidthSlotEditor(
                     width: widthBinding(for: index),
                     range: palette.activeWidthRange,
-                    color: widthPreviewColor,
-                    presetSteps: palette.activeWidthPresetSteps
+                    color: widthPreviewColor
                 )
                 .padding(14)
                 .presentationCompactAdaptation(.popover)
@@ -1358,10 +1356,11 @@ private struct WidthSlotEditor: View {
     @Binding var width: CGFloat
     let range: ClosedRange<CGFloat>
     let color: Color
-    let presetSteps: [CGFloat]
+
+    private let fineStep: CGFloat = 0.1
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
@@ -1373,36 +1372,63 @@ private struct WidthSlotEditor: View {
                                height: max(4, min(width, 32)))
                 }
 
-                Text("\(Int(width.rounded())) pt")
+                Text(formattedWidth)
                     .font(AppType.bodyEmphasized)
                     .monospacedDigit()
                     .foregroundStyle(Color.Ink.primary)
-                    .frame(width: 52, alignment: .leading)
+                    .frame(width: 72, alignment: .leading)
             }
 
-            Slider(value: $width, in: range)
-                .frame(width: 220)
+            Slider(value: steppedWidth, in: range, step: fineStep)
+                .frame(width: 236)
 
-            HStack(spacing: 8) {
-                ForEach(Array(presetSteps.enumerated()), id: \.offset) { _, step in
-                    Button {
-                        width = step
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(Color.Surface.fill)
-                                .frame(width: 34, height: 34)
-                            Circle()
-                                .fill(color)
-                                .frame(width: max(4, min(step, 24)),
-                                       height: max(4, min(step, 24)))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("기본 굵기 \(Int(step.rounded())) pt")
-                }
+            HStack(spacing: 6) {
+                widthStepButton(label: "-1", delta: -1)
+                widthStepButton(label: "-0.1", delta: -0.1)
+                widthStepButton(label: "+0.1", delta: 0.1)
+                widthStepButton(label: "+1", delta: 1)
             }
         }
+        .frame(width: 248)
+    }
+
+    private var steppedWidth: Binding<CGFloat> {
+        Binding(
+            get: { roundedToFineStep(width) },
+            set: { width = clamped(roundedToFineStep($0)) }
+        )
+    }
+
+    private var formattedWidth: String {
+        String(format: "%.1f pt", Double(roundedToFineStep(width)))
+    }
+
+    private func widthStepButton(label: String, delta: CGFloat) -> some View {
+        Button {
+            width = clamped(roundedToFineStep(width + delta))
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            Text(label)
+                .font(.system(size: 12, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(Color.Ink.primary)
+                .frame(width: 54, height: 32)
+                .background(Color.Surface.fill, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
+                        .stroke(Color.Rule.hairline, lineWidth: 0.8)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("굵기 \(label) pt")
+    }
+
+    private func roundedToFineStep(_ value: CGFloat) -> CGFloat {
+        (value / fineStep).rounded() * fineStep
+    }
+
+    private func clamped(_ value: CGFloat) -> CGFloat {
+        min(max(value, range.lowerBound), range.upperBound)
     }
 }
 
