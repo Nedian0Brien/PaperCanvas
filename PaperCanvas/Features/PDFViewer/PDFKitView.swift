@@ -1453,8 +1453,10 @@ struct PDFKitView: UIViewRepresentable {
             return RenderedPDFInkStroke(
                 path: viewPath,
                 color: stroke.color.uiColor,
-                blendMode: isMarker ? .multiply : .normal,
-                opacity: opacity
+                blendMode: isMarker || stroke.tool == .pencil ? .multiply : .normal,
+                opacity: opacity,
+                tool: stroke.tool,
+                baseWidth: stroke.baseWidth
             )
         }
 
@@ -1919,6 +1921,8 @@ private struct RenderedPDFInkStroke {
     var color: UIColor
     var blendMode: CGBlendMode
     var opacity: CGFloat
+    var tool: InkTool
+    var baseWidth: CGFloat
 }
 
 private enum RenderedPDFInkLasso {
@@ -1966,17 +1970,60 @@ private final class PDFInkRenderView: UIView {
         context.setShouldAntialias(true)
 
         for stroke in strokes {
-            context.saveGState()
-            context.setBlendMode(stroke.blendMode)
-            context.setAlpha(stroke.opacity)
-            context.setFillColor(stroke.color.cgColor)
-            context.addPath(stroke.path)
-            context.fillPath()
-            context.restoreGState()
+            if stroke.tool == .pencil {
+                drawPencilStroke(stroke, in: context)
+            } else {
+                context.saveGState()
+                context.setBlendMode(stroke.blendMode)
+                context.setAlpha(stroke.opacity)
+                context.setFillColor(stroke.color.cgColor)
+                context.addPath(stroke.path)
+                context.fillPath()
+                context.restoreGState()
+            }
         }
 
         drawSelectionRects(in: context)
         drawActiveLasso(in: context)
+    }
+
+    private func drawPencilStroke(_ stroke: RenderedPDFInkStroke, in context: CGContext) {
+        let bounds = stroke.path.boundingBoxOfPath.insetBy(dx: -2, dy: -2)
+        guard bounds.minX.isFinite,
+              bounds.minY.isFinite,
+              bounds.width.isFinite,
+              bounds.height.isFinite,
+              !bounds.isEmpty else { return }
+
+        context.saveGState()
+        context.setBlendMode(.multiply)
+        context.setAlpha(stroke.opacity * 0.46)
+        context.setFillColor(stroke.color.cgColor)
+        context.addPath(stroke.path)
+        context.fillPath()
+        context.restoreGState()
+
+        context.saveGState()
+        context.addPath(stroke.path)
+        context.clip()
+        context.setBlendMode(.multiply)
+        context.setStrokeColor(stroke.color.withAlphaComponent(stroke.opacity * 0.18).cgColor)
+        context.setLineWidth(max(0.35, min(stroke.baseWidth * 0.18, 1.2)))
+        context.setLineCap(.round)
+
+        let spacing = max(1.4, min(stroke.baseWidth * 0.65, 4.2))
+        let diagonalSpan = bounds.width + bounds.height
+        var y = bounds.minY - bounds.width
+        var index = 0
+        while y <= bounds.maxY + bounds.width {
+            let jitter = CGFloat((index * 37) % 11) * 0.13
+            context.move(to: CGPoint(x: bounds.minX - 4, y: y + jitter))
+            context.addLine(to: CGPoint(x: bounds.minX + diagonalSpan, y: y + diagonalSpan + jitter))
+            y += spacing
+            index += 1
+        }
+        context.strokePath()
+        context.restoreGState()
     }
 
     private func drawSelectionRects(in context: CGContext) {
