@@ -162,6 +162,7 @@ struct PDFKitView: UIViewRepresentable {
         private var visiblePagesObserver: NSObjectProtocol?
         private var scrollObservations: [NSKeyValueObservation] = []
         private var displayLink: CADisplayLink?
+        private var isViewportUpdateScheduled = false
         private var lastViewportKey = ""
         private var lastStrokeSignature = ""
         private var outlineCache: [PDFInkOutlineCacheKey: CGPath] = [:]
@@ -1581,26 +1582,37 @@ struct PDFKitView: UIViewRepresentable {
 
         @objc private func displayLinkTick() {
             defer { displayLink?.isPaused = true }
-            guard let hostPDFView else { return }
-            let key = viewportKey(pdfView: hostPDFView)
-            if key != lastViewportKey {
-                lastViewportKey = key
-                rebuildRenderedInk()
-                refreshHoverIndicator()
-                if let inkRenderView {
-                    inkRenderView.frame = hostPDFView.bounds
-                    hostPDFView.bringSubviewToFront(inkRenderView)
-                }
-                if let overlay = anchorOverlay {
-                    overlay.frame = hostPDFView.bounds
-                    overlay.relayoutForViewportChange()
-                    hostPDFView.bringSubviewToFront(overlay)
-                }
-                if let live = liveHighlightOverlay {
-                    live.frame = hostPDFView.bounds
-                    live.setNeedsDisplay()
-                    hostPDFView.bringSubviewToFront(live)
-                }
+            guard let hostPDFView, !isViewportUpdateScheduled else { return }
+            isViewportUpdateScheduled = true
+            DispatchQueue.main.async { [weak self, weak hostPDFView] in
+                guard let self, let hostPDFView else { return }
+                self.isViewportUpdateScheduled = false
+                self.applyViewportUpdate(in: hostPDFView)
+            }
+        }
+
+        private func applyViewportUpdate(in pdfView: PDFView) {
+            pdfView.layoutDocumentView()
+            pdfView.layoutIfNeeded()
+            internalScrollView?.layoutIfNeeded()
+            let key = viewportKey(pdfView: pdfView)
+            guard key != lastViewportKey else { return }
+            lastViewportKey = key
+            rebuildRenderedInk()
+            refreshHoverIndicator()
+            if let inkRenderView {
+                inkRenderView.frame = pdfView.bounds
+                pdfView.bringSubviewToFront(inkRenderView)
+            }
+            if let overlay = anchorOverlay {
+                overlay.frame = pdfView.bounds
+                overlay.relayoutForViewportChange()
+                pdfView.bringSubviewToFront(overlay)
+            }
+            if let live = liveHighlightOverlay {
+                live.frame = pdfView.bounds
+                live.setNeedsDisplay()
+                pdfView.bringSubviewToFront(live)
             }
         }
 
