@@ -97,6 +97,7 @@ struct PDFKitView: UIViewRepresentable {
                 pdfView.go(to: page)
             }
             pdfView.layoutDocumentView()
+            context.coordinator.attachScrollObservers()
             context.coordinator.rebuildRenderedInk()
             context.coordinator.syncAnchorOverlay()
         }
@@ -116,6 +117,7 @@ struct PDFKitView: UIViewRepresentable {
                     pdfView.goToFirstPage(nil)
                 }
                 pdfView.layoutDocumentView()
+                context.coordinator.attachScrollObservers()
                 context.coordinator.rebuildRenderedInk()
             }
         }
@@ -241,8 +243,8 @@ struct PDFKitView: UIViewRepresentable {
             }
             startDisplayLink()
             DispatchQueue.main.async { [weak self] in
-                self?.attachScrollObservers()
                 pdfView.layoutDocumentView()
+                self?.attachScrollObservers()
                 self?.rebuildRenderedInk()
             }
         }
@@ -1592,11 +1594,15 @@ struct PDFKitView: UIViewRepresentable {
         }
 
         private func applyViewportUpdate(in pdfView: PDFView) {
+            configurePDFScrollPhysics(in: pdfView)
             pdfView.layoutDocumentView()
             pdfView.layoutIfNeeded()
             internalScrollView?.layoutIfNeeded()
+            inkRenderView?.transform = .identity
+            anchorOverlay?.transform = .identity
+            liveHighlightOverlay?.transform = .identity
+
             let key = viewportKey(pdfView: pdfView)
-            let compensation = viewportPresentationCompensation()
             if key != lastViewportKey {
                 lastViewportKey = key
                 rebuildRenderedInk()
@@ -1616,27 +1622,6 @@ struct PDFKitView: UIViewRepresentable {
                     pdfView.bringSubviewToFront(live)
                 }
             }
-            applyViewportCompensation(compensation)
-            if compensation != .identity {
-                displayLink?.isPaused = false
-            }
-        }
-
-        private func viewportPresentationCompensation() -> CGAffineTransform {
-            guard let scrollView = internalScrollView,
-                  let presentation = scrollView.layer.presentation() else { return .identity }
-            let modelOrigin = scrollView.bounds.origin
-            let presentationOrigin = presentation.bounds.origin
-            let dx = modelOrigin.x - presentationOrigin.x
-            let dy = modelOrigin.y - presentationOrigin.y
-            guard abs(dx) > 0.05 || abs(dy) > 0.05 else { return .identity }
-            return CGAffineTransform(translationX: dx, y: dy)
-        }
-
-        private func applyViewportCompensation(_ transform: CGAffineTransform) {
-            inkRenderView?.transform = transform
-            anchorOverlay?.transform = transform
-            liveHighlightOverlay?.transform = transform
         }
 
         private func viewportKey(pdfView: PDFView) -> String {
@@ -1655,8 +1640,10 @@ struct PDFKitView: UIViewRepresentable {
             ].joined(separator: "#")
         }
 
-        private func attachScrollObservers() {
-            guard let hostPDFView, internalScrollView == nil,
+        fileprivate func attachScrollObservers() {
+            guard let hostPDFView else { return }
+            configurePDFScrollPhysics(in: hostPDFView)
+            guard internalScrollView == nil,
                   let scrollView = findInternalScrollView(in: hostPDFView) else { return }
             internalScrollView = scrollView
             scrollObservations.append(scrollView.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
@@ -1669,6 +1656,18 @@ struct PDFKitView: UIViewRepresentable {
                     self?.invalidateViewportTracking()
                 }
             })
+        }
+
+        private func configurePDFScrollPhysics(in root: UIView) {
+            if let scrollView = root as? UIScrollView {
+                scrollView.bounces = false
+                scrollView.alwaysBounceVertical = false
+                scrollView.alwaysBounceHorizontal = false
+                scrollView.bouncesZoom = false
+            }
+            for subview in root.subviews {
+                configurePDFScrollPhysics(in: subview)
+            }
         }
 
         private func invalidateViewportTracking() {
