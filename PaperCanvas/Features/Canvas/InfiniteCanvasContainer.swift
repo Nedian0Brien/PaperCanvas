@@ -563,8 +563,12 @@ struct InfiniteCanvasContainer: UIViewRepresentable {
         }
 
         private func publishDrawing(_ drawing: PKDrawing) {
-            lastSyncedData = drawing.dataRepresentation()
-            parent.drawing = drawing
+            let data = drawing.dataRepresentation()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.lastSyncedData = data
+                self.parent.drawing = drawing
+            }
         }
 
         private func notifyUndoRedoState(_ canvasView: PKCanvasView) {

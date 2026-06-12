@@ -31,7 +31,7 @@ struct PDFKitView: UIViewRepresentable {
         wrapper.backgroundColor = .secondarySystemBackground
         wrapper.clipsToBounds = true
 
-        let pdfView = PDFView()
+        let pdfView = PaperCanvasPDFView()
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
@@ -1749,6 +1749,19 @@ private struct PDFInkOutlineCacheKey: Hashable {
         lastX = Double(last?.location.x ?? 0)
         lastY = Double(last?.location.y ?? 0)
         lastForce = Double(last?.force ?? 0)
+    }
+}
+
+private final class PaperCanvasPDFView: PDFView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let hitView = super.hitTest(point, with: event) else { return nil }
+        guard hitView === self || hitView.isDescendant(of: self) else {
+            return bounds.contains(point) ? self : nil
+        }
+        guard hitView.window != nil || window == nil else {
+            return bounds.contains(point) ? self : nil
+        }
+        return hitView
     }
 }
 
