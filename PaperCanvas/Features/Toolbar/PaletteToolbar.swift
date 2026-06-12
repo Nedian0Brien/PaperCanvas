@@ -37,6 +37,7 @@ struct PaletteToolbar: View {
     private enum PaletteEditor: Identifiable, Equatable {
         case pen
         case marker
+        case pencil
         case width(Int)
         case color(Int)
 
@@ -46,6 +47,8 @@ struct PaletteToolbar: View {
                 return "pen"
             case .marker:
                 return "marker"
+            case .pencil:
+                return "pencil"
             case .width(let index):
                 return "width-\(index)"
             case .color(let index):
@@ -129,6 +132,13 @@ struct PaletteToolbar: View {
                 .padding(12)
                 .presentationCompactAdaptation(.popover)
         }
+        .popover(isPresented: pencilEditorPresentedBinding,
+                 attachmentAnchor: .point(pencilPopoverAnchor),
+                 arrowEdge: popoverArrowEdge) {
+            pencilSettingsEditor
+                .padding(14)
+                .presentationCompactAdaptation(.popover)
+        }
     }
 
     private var toolSegments: [SegmentedPaletteItem] {
@@ -151,6 +161,9 @@ struct PaletteToolbar: View {
         withAnimation(ToolbarMetrics.selectorAnimation) {
             palette.tool = kind
         }
+        if kind == .pencil {
+            activeEditor = .pencil
+        }
         UIImpactFeedbackGenerator(style: kind.hapticStyle).impactOccurred()
     }
 
@@ -160,6 +173,8 @@ struct PaletteToolbar: View {
             activeEditor = .pen
         } else if kind == .marker {
             activeEditor = .marker
+        } else if kind == .pencil {
+            activeEditor = .pencil
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
@@ -196,6 +211,13 @@ struct PaletteToolbar: View {
                  arrowEdge: popoverArrowEdge) {
             markerSubmodePicker
                 .padding(12)
+                .presentationCompactAdaptation(.popover)
+        }
+        .popover(isPresented: pencilEditorPresentedBinding,
+                 attachmentAnchor: .point(verticalPencilPopoverAnchor),
+                 arrowEdge: popoverArrowEdge) {
+            pencilSettingsEditor
+                .padding(14)
                 .presentationCompactAdaptation(.popover)
         }
     }
@@ -323,6 +345,40 @@ struct PaletteToolbar: View {
         )
     }
 
+    private var pencilEditorPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { activeEditor == .pencil },
+            set: { isPresented in
+                if !isPresented, activeEditor == .pencil {
+                    activeEditor = nil
+                }
+            }
+        )
+    }
+
+    private var pencilSettingsEditor: some View {
+        PencilSettingsEditor(
+            width: pencilWidthBinding,
+            widthRange: ToolKind.pencil.widthRange,
+            color: pencilColorBinding,
+            presetColors: Array(palette.presetColors.prefix(6))
+        )
+    }
+
+    private var pencilWidthBinding: Binding<CGFloat> {
+        Binding(
+            get: { palette.width },
+            set: { palette.setWidth(min(max($0, ToolKind.pencil.widthRange.lowerBound), ToolKind.pencil.widthRange.upperBound)) }
+        )
+    }
+
+    private var pencilColorBinding: Binding<Color> {
+        Binding(
+            get: { palette.color },
+            set: { palette.setSelectedColor($0) }
+        )
+    }
+
     private var toolPopoverAnchor: UnitPoint {
         segmentAnchorPoint(
             index: ToolKind.allCases.firstIndex(of: .pen),
@@ -348,6 +404,21 @@ struct PaletteToolbar: View {
     private var verticalMarkerPopoverAnchor: UnitPoint {
         segmentAnchorPoint(
             index: ToolKind.allCases.firstIndex(of: .marker),
+            count: ToolKind.allCases.count,
+            axis: .vertical
+        )
+    }
+
+    private var pencilPopoverAnchor: UnitPoint {
+        segmentAnchorPoint(
+            index: ToolKind.allCases.firstIndex(of: .pencil),
+            count: ToolKind.allCases.count
+        )
+    }
+
+    private var verticalPencilPopoverAnchor: UnitPoint {
+        segmentAnchorPoint(
+            index: ToolKind.allCases.firstIndex(of: .pencil),
             count: ToolKind.allCases.count,
             axis: .vertical
         )
@@ -1355,6 +1426,144 @@ private final class RetappableSegmentedControl: UISegmentedControl {
         let segmentWidth = bounds.width / CGFloat(numberOfSegments)
         guard segmentWidth > 0 else { return nil }
         return min(max(Int(point.x / segmentWidth), 0), numberOfSegments - 1)
+    }
+}
+
+private struct PencilSettingsEditor: View {
+    @Binding var width: CGFloat
+    let widthRange: ClosedRange<CGFloat>
+    @Binding var color: Color
+    let presetColors: [Color]
+
+    private let fineStep: CGFloat = 0.1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "pencil")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color.Ink.primary)
+                    .frame(width: 30, height: 30)
+                    .background(Color.Surface.fill, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
+                            .stroke(Color.Rule.hairline, lineWidth: 0.8)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("연필")
+                        .font(AppType.bodyEmphasized)
+                        .foregroundStyle(Color.Ink.primary)
+                    Text(formattedWidth)
+                        .font(.system(size: 12, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.Ink.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Circle()
+                    .fill(color)
+                    .frame(width: 26, height: 26)
+                    .overlay(Circle().stroke(Color.Rule.hairline, lineWidth: 0.8))
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("굵기")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.Ink.secondary)
+
+                Slider(value: steppedWidth, in: widthRange, step: fineStep)
+                    .frame(width: 248)
+
+                HStack(spacing: 6) {
+                    widthStepButton(label: "-1", delta: -1)
+                    widthStepButton(label: "-0.1", delta: -0.1)
+                    widthStepButton(label: "+0.1", delta: 0.1)
+                    widthStepButton(label: "+1", delta: 1)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("색상")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.Ink.secondary)
+
+                HStack(spacing: 8) {
+                    ForEach(Array(presetColors.enumerated()), id: \.offset) { _, presetColor in
+                        Button {
+                            color = presetColor
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        } label: {
+                            Circle()
+                                .fill(presetColor)
+                                .frame(width: 24, height: 24)
+                                .overlay(
+                                    Circle()
+                                        .stroke(isSelected(presetColor) ? Color.accentColor : Color.Rule.hairline,
+                                                lineWidth: isSelected(presetColor) ? 2.2 : 0.8)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    ColorPicker("", selection: $color, supportsOpacity: false)
+                        .labelsHidden()
+                        .frame(width: 34, height: 28)
+                }
+            }
+        }
+        .frame(width: 260)
+    }
+
+    private var steppedWidth: Binding<CGFloat> {
+        Binding(
+            get: { roundedToFineStep(width) },
+            set: { width = clamped(roundedToFineStep($0)) }
+        )
+    }
+
+    private var formattedWidth: String {
+        String(format: "%.1f pt", Double(roundedToFineStep(width)))
+    }
+
+    private func widthStepButton(label: String, delta: CGFloat) -> some View {
+        Button {
+            width = clamped(roundedToFineStep(width + delta))
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            Text(label)
+                .font(.system(size: 12, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(Color.Ink.primary)
+                .frame(width: 58, height: 30)
+                .background(Color.Surface.fill, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
+                        .stroke(Color.Rule.hairline, lineWidth: 0.8)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("연필 굵기 \(label) pt")
+    }
+
+    private func roundedToFineStep(_ value: CGFloat) -> CGFloat {
+        (value / fineStep).rounded() * fineStep
+    }
+
+    private func clamped(_ value: CGFloat) -> CGFloat {
+        min(max(value, widthRange.lowerBound), widthRange.upperBound)
+    }
+
+    private func isSelected(_ presetColor: Color) -> Bool {
+        let current = UIColor(color)
+        let preset = UIColor(presetColor)
+        var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
+        var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
+        current.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+        preset.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+        let tol: CGFloat = 0.005
+        return abs(r1 - r2) < tol && abs(g1 - g2) < tol && abs(b1 - b2) < tol
     }
 }
 
