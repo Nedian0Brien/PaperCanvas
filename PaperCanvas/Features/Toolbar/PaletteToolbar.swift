@@ -25,8 +25,11 @@ struct PaletteToolbar: View {
         static let modeGroupWidth: CGFloat = 154
         static let verticalModeWidth: CGFloat = verticalControlWidth
         static let verticalModeHeight: CGFloat = verticalItemHeight
+        static let verticalWidthSlotGroupHeight: CGFloat = verticalItemHeight * 3
+        static let verticalModeGroupHeight: CGFloat = verticalModeHeight * 2
         static let propertyGap: CGFloat = 8
         static let miniDividerWidth: CGFloat = 0.5
+        static let verticalPropertySelectorHeight: CGFloat = verticalWidthSlotGroupHeight + verticalModeGroupHeight + propertyGap * 2 + miniDividerWidth
         static let doubleSlotGroupWidth: CGFloat = slotGroupWidth * 2 + propertyGap * 2 + miniDividerWidth
         static let selectorAnimation = Animation.spring(response: 0.24, dampingFraction: 0.82)
     }
@@ -382,6 +385,7 @@ struct PaletteToolbar: View {
                 verticalLassoModeGroup
             }
         }
+        .frame(height: ToolbarMetrics.verticalPropertySelectorHeight, alignment: .top)
     }
 
     private var miniDivider: some View {
@@ -1161,28 +1165,30 @@ private extension UIImage {
         let symbol = UIImage(systemName: systemName, withConfiguration: symbolConfig)?
             .withTintColor(textColor, renderingMode: .alwaysOriginal)
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 11, weight: .semibold),
+            .font: UIFont.systemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: textColor
         ]
         let text = NSString(string: title)
         let textSize = text.size(withAttributes: attributes)
         let iconSize = CGSize(width: 15, height: 15)
-        let spacing: CGFloat = 4
-        let totalWidth = iconSize.width + spacing + textSize.width
-        let size = CGSize(width: ceil(totalWidth),
-                          height: max(24, ceil(max(iconSize.height, textSize.height)) + 4))
-        let centerY = size.height / 2
+        let spacing: CGFloat = 2
+        let contentWidth = max(iconSize.width, ceil(textSize.width))
+        let contentHeight = iconSize.height + spacing + ceil(textSize.height)
+        let size = CGSize(width: max(24, contentWidth + 4),
+                          height: max(32, contentHeight + 4))
+        let centerX = size.width / 2
+        let startY = (size.height - contentHeight) / 2
 
         return UIGraphicsImageRenderer(size: size).image { _ in
             symbol?.draw(in: CGRect(
-                x: 0,
-                y: centerY - iconSize.height / 2,
+                x: centerX - iconSize.width / 2,
+                y: startY,
                 width: iconSize.width,
                 height: iconSize.height
             ))
             text.draw(at: CGPoint(
-                x: iconSize.width + spacing,
-                y: centerY - textSize.height / 2
+                x: centerX - textSize.width / 2,
+                y: startY + iconSize.height + spacing
             ), withAttributes: attributes)
         }.withRenderingMode(.alwaysOriginal)
     }
