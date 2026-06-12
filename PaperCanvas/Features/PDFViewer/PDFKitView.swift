@@ -1449,6 +1449,7 @@ struct PDFKitView: UIViewRepresentable {
                   ) else { return nil }
             var transform = pageSpaceToViewTransform(page: page, pdfView: pdfView)
             guard let viewPath = pagePath.copy(using: &transform) else { return nil }
+            let renderedWidth = stroke.baseWidth * max(hypot(transform.a, transform.b), hypot(transform.c, transform.d))
             let isMarker = stroke.tool == .marker || stroke.tool == .highlighter
             let viewSamples = stroke.points.map { point in
                 RenderedPDFInkSample(
@@ -1464,6 +1465,7 @@ struct PDFKitView: UIViewRepresentable {
                 opacity: opacity,
                 tool: stroke.tool,
                 baseWidth: stroke.baseWidth,
+                renderedWidth: renderedWidth,
                 samples: viewSamples
             )
         }
@@ -1937,6 +1939,7 @@ private struct RenderedPDFInkStroke {
     var opacity: CGFloat
     var tool: InkTool
     var baseWidth: CGFloat
+    var renderedWidth: CGFloat
     var samples: [RenderedPDFInkSample]
 }
 
@@ -2041,8 +2044,9 @@ private final class PDFInkRenderView: UIView {
                                       in context: CGContext) {
         let samples = stroke.samples
         guard let first = samples.first else { return }
-        let passOffset = CGFloat(pass - 1) * max(0.28, min(stroke.baseWidth * 0.10, 0.9))
-        context.setLineWidth(max(0.28, min(stroke.baseWidth * (0.16 + CGFloat(pass) * 0.035), 1.15)))
+        let width = max(stroke.renderedWidth, stroke.baseWidth)
+        let passOffset = CGFloat(pass - 1) * max(0.35, min(width * 0.16, 1.8))
+        context.setLineWidth(max(0.45, min(width * (0.24 + CGFloat(pass) * 0.055), 2.8)))
         context.beginPath()
         context.move(to: jitteredPencilPoint(first.location,
                                              index: 0,
@@ -2079,13 +2083,14 @@ private final class PDFInkRenderView: UIView {
 
     private func drawPencilGrain(_ stroke: RenderedPDFInkStroke, in context: CGContext) {
         let samples = stroke.samples
-        let radius = max(0.8, min(stroke.baseWidth * 0.55, 5.5))
-        let dotSize = max(0.35, min(stroke.baseWidth * 0.10, 0.9))
+        let width = max(stroke.renderedWidth, stroke.baseWidth)
+        let radius = max(1.1, min(width * 0.68, 8.0))
+        let dotSize = max(0.42, min(width * 0.16, 1.45))
         for index in samples.indices {
             guard index % 2 == 0 else { continue }
             let sample = samples[index]
             let pressure = max(0.15, min(sample.force, 1))
-            let dotCount = max(1, min(Int(stroke.baseWidth * pressure * 1.4), 8))
+            let dotCount = max(2, min(Int(width * pressure * 1.7), 12))
             for dot in 0..<dotCount {
                 let seed = CGFloat(((index + 1) * 73 + dot * 29) % 101) / 100
                 let seed2 = CGFloat(((index + 1) * 41 + dot * 53) % 101) / 100
