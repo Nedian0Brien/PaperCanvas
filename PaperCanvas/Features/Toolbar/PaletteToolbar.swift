@@ -121,21 +121,21 @@ struct PaletteToolbar: View {
         .popover(isPresented: penEditorPresentedBinding,
                  attachmentAnchor: .point(toolPopoverAnchor),
                  arrowEdge: popoverArrowEdge) {
-            penPicker
-                .padding(10)
+            drawingToolSettingsEditor(for: .pen)
+                .padding(14)
                 .presentationCompactAdaptation(.popover)
         }
         .popover(isPresented: markerEditorPresentedBinding,
                  attachmentAnchor: .point(markerPopoverAnchor),
                  arrowEdge: popoverArrowEdge) {
-            markerSubmodePicker
-                .padding(12)
+            drawingToolSettingsEditor(for: .marker)
+                .padding(14)
                 .presentationCompactAdaptation(.popover)
         }
         .popover(isPresented: pencilEditorPresentedBinding,
                  attachmentAnchor: .point(pencilPopoverAnchor),
                  arrowEdge: popoverArrowEdge) {
-            pencilSettingsEditor
+            drawingToolSettingsEditor(for: .pencil)
                 .padding(14)
                 .presentationCompactAdaptation(.popover)
         }
@@ -161,22 +161,29 @@ struct PaletteToolbar: View {
         withAnimation(ToolbarMetrics.selectorAnimation) {
             palette.tool = kind
         }
-        if kind == .pencil {
-            activeEditor = .pencil
+        if kind.supportsColor {
+            activeEditor = editor(for: kind)
         }
         UIImpactFeedbackGenerator(style: kind.hapticStyle).impactOccurred()
     }
 
     private func handleToolReselect(_ kind: ToolKind) {
         closePropertyEditors()
-        if kind == .pen {
-            activeEditor = .pen
-        } else if kind == .marker {
-            activeEditor = .marker
-        } else if kind == .pencil {
-            activeEditor = .pencil
-        }
+        activeEditor = editor(for: kind)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func editor(for kind: ToolKind) -> PaletteEditor? {
+        switch kind {
+        case .pen:
+            return .pen
+        case .marker:
+            return .marker
+        case .pencil:
+            return .pencil
+        case .eraser, .lasso:
+            return nil
+        }
     }
 
     @ViewBuilder
@@ -202,108 +209,23 @@ struct PaletteToolbar: View {
         .popover(isPresented: penEditorPresentedBinding,
                  attachmentAnchor: .point(verticalToolPopoverAnchor),
                  arrowEdge: popoverArrowEdge) {
-            penPicker
-                .padding(10)
+            drawingToolSettingsEditor(for: .pen)
+                .padding(14)
                 .presentationCompactAdaptation(.popover)
         }
         .popover(isPresented: markerEditorPresentedBinding,
                  attachmentAnchor: .point(verticalMarkerPopoverAnchor),
                  arrowEdge: popoverArrowEdge) {
-            markerSubmodePicker
-                .padding(12)
+            drawingToolSettingsEditor(for: .marker)
+                .padding(14)
                 .presentationCompactAdaptation(.popover)
         }
         .popover(isPresented: pencilEditorPresentedBinding,
                  attachmentAnchor: .point(verticalPencilPopoverAnchor),
                  arrowEdge: popoverArrowEdge) {
-            pencilSettingsEditor
+            drawingToolSettingsEditor(for: .pencil)
                 .padding(14)
                 .presentationCompactAdaptation(.popover)
-        }
-    }
-
-    private var markerSubmodePicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("형광펜 모드")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.Ink.secondary)
-                .padding(.bottom, 2)
-            markerSubmodeRow(title: "잉크 스트로크",
-                             systemImage: "scribble",
-                             isOn: Binding(
-                                get: { palette.markerSubmode.inkEnabled },
-                                set: { newValue in
-                                    var s = palette.markerSubmode
-                                    s.inkEnabled = newValue
-                                    palette.setMarkerSubmode(s)
-                                }
-                             ))
-            markerSubmodeRow(title: "텍스트 하이라이트",
-                             systemImage: "highlighter",
-                             isOn: Binding(
-                                get: { palette.markerSubmode.highlightEnabled },
-                                set: { newValue in
-                                    var s = palette.markerSubmode
-                                    s.highlightEnabled = newValue
-                                    palette.setMarkerSubmode(s)
-                                }
-                             ))
-            markerSubmodeRow(title: "영역 선택 (꾹 누르기)",
-                             systemImage: "rectangle.dashed",
-                             isOn: Binding(
-                                get: { palette.markerSubmode.regionEnabled },
-                                set: { newValue in
-                                    var s = palette.markerSubmode
-                                    s.regionEnabled = newValue
-                                    palette.setMarkerSubmode(s)
-                                }
-                             ))
-        }
-        .frame(width: 220)
-    }
-
-    private func markerSubmodeRow(title: String,
-                                  systemImage: String,
-                                  isOn: Binding<Bool>) -> some View {
-        Toggle(isOn: isOn) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: 18)
-                Text(title)
-                    .font(.system(size: 14))
-            }
-            .foregroundStyle(Color.Ink.primary)
-        }
-        .toggleStyle(.switch)
-        .controlSize(.small)
-    }
-
-    private var penPicker: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(PenKind.allCases) { kind in
-                Button {
-                    palette.setPenKind(kind)
-                    activeEditor = nil
-                } label: {
-                    HStack(spacing: 10) {
-                        penKindGlyph(kind)
-                            .frame(width: 24, height: 24)
-                        Text(kind.label)
-                            .font(.body)
-                        Spacer(minLength: 12)
-                        if palette.penKind == kind {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
-                        }
-                    }
-                    .foregroundStyle(Color.Ink.primary)
-                    .frame(width: 180, height: 36)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
         }
     }
 
@@ -356,27 +278,36 @@ struct PaletteToolbar: View {
         )
     }
 
-    private var pencilSettingsEditor: some View {
-        PencilSettingsEditor(
-            width: pencilWidthBinding,
-            widthRange: ToolKind.pencil.widthRange,
-            color: pencilColorBinding,
-            presetColors: Array(palette.presetColors.prefix(6))
+    private func drawingToolSettingsEditor(for tool: ToolKind) -> some View {
+        DrawingToolSettingsEditor(
+            tool: tool,
+            penKind: palette.penKind,
+            width: drawingToolWidthBinding(for: tool),
+            widthRange: widthRange(for: tool),
+            color: drawingToolColorBinding,
+            presetColors: palette.presetColors,
+            markerSubmode: palette.markerSubmode,
+            onSelectPenKind: { palette.setPenKind($0) },
+            onSetMarkerSubmode: { palette.setMarkerSubmode($0) }
         )
     }
 
-    private var pencilWidthBinding: Binding<CGFloat> {
+    private func drawingToolWidthBinding(for tool: ToolKind) -> Binding<CGFloat> {
         Binding(
             get: { palette.width },
-            set: { palette.setWidth(min(max($0, ToolKind.pencil.widthRange.lowerBound), ToolKind.pencil.widthRange.upperBound)) }
+            set: { palette.setWidth(clamp($0, to: widthRange(for: tool))) }
         )
     }
 
-    private var pencilColorBinding: Binding<Color> {
+    private var drawingToolColorBinding: Binding<Color> {
         Binding(
             get: { palette.color },
             set: { palette.setSelectedColor($0) }
         )
+    }
+
+    private func widthRange(for tool: ToolKind) -> ClosedRange<CGFloat> {
+        tool == .pen ? palette.penKind.widthRange : tool.widthRange
     }
 
     private var toolPopoverAnchor: UnitPoint {
@@ -992,6 +923,10 @@ struct PaletteToolbar: View {
         .accessibilityLabel("다시 실행")
     }
 
+    private func clamp(_ value: CGFloat, to range: ClosedRange<CGFloat>) -> CGFloat {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
+
     private func colorsApproximatelyEqual(_ a: Color, _ b: Color) -> Bool {
         let ua = UIColor(a)
         let ub = UIColor(b)
@@ -1429,91 +1364,181 @@ private final class RetappableSegmentedControl: UISegmentedControl {
     }
 }
 
-private struct PencilSettingsEditor: View {
+private struct DrawingToolSettingsEditor: View {
+    let tool: ToolKind
+    let penKind: PenKind
     @Binding var width: CGFloat
     let widthRange: ClosedRange<CGFloat>
     @Binding var color: Color
     let presetColors: [Color]
+    let markerSubmode: MarkerSubmode
+    let onSelectPenKind: (PenKind) -> Void
+    let onSetMarkerSubmode: (MarkerSubmode) -> Void
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private let fineStep: CGFloat = 0.1
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: "pencil")
-                    .font(.system(size: 17, weight: .semibold))
+            header
+
+            if tool == .pen {
+                penKindSection
+            }
+
+            if tool == .marker {
+                markerModeSection
+            }
+
+            widthSection
+            colorSection
+        }
+        .frame(width: editorWidth)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Image(systemName: headerSystemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.Ink.primary)
+                .frame(width: 30, height: 30)
+                .background(Color.Surface.fill, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
+                        .stroke(Color.Rule.hairline, lineWidth: 0.8)
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(headerTitle)
+                    .font(AppType.bodyEmphasized)
                     .foregroundStyle(Color.Ink.primary)
-                    .frame(width: 30, height: 30)
-                    .background(Color.Surface.fill, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
-                            .stroke(Color.Rule.hairline, lineWidth: 0.8)
-                    )
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("연필")
-                        .font(AppType.bodyEmphasized)
-                        .foregroundStyle(Color.Ink.primary)
-                    Text(formattedWidth)
-                        .font(.system(size: 12, weight: .semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(Color.Ink.secondary)
-                }
-
-                Spacer(minLength: 8)
-
-                Circle()
-                    .fill(color)
-                    .frame(width: 26, height: 26)
-                    .overlay(Circle().stroke(Color.Rule.hairline, lineWidth: 0.8))
+                Text(formattedWidth)
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.Ink.secondary)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("굵기")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.Ink.secondary)
+            Spacer(minLength: 8)
 
-                Slider(value: steppedWidth, in: widthRange, step: fineStep)
-                    .frame(width: 248)
+            Circle()
+                .fill(color)
+                .frame(width: 26, height: 26)
+                .overlay(Circle().stroke(Color.Rule.hairline, lineWidth: 0.8))
+        }
+    }
 
-                HStack(spacing: 6) {
-                    widthStepButton(label: "-1", delta: -1)
-                    widthStepButton(label: "-0.1", delta: -0.1)
-                    widthStepButton(label: "+0.1", delta: 0.1)
-                    widthStepButton(label: "+1", delta: 1)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("색상")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.Ink.secondary)
-
-                HStack(spacing: 8) {
-                    ForEach(Array(presetColors.enumerated()), id: \.offset) { _, presetColor in
-                        Button {
-                            color = presetColor
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        } label: {
-                            Circle()
-                                .fill(presetColor)
-                                .frame(width: 24, height: 24)
-                                .overlay(
-                                    Circle()
-                                        .stroke(isSelected(presetColor) ? Color.accentColor : Color.Rule.hairline,
-                                                lineWidth: isSelected(presetColor) ? 2.2 : 0.8)
-                                )
-                        }
-                        .buttonStyle(.plain)
+    private var penKindSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("펜 종류")
+            HStack(spacing: 6) {
+                ForEach(PenKind.allCases) { kind in
+                    Button {
+                        onSelectPenKind(kind)
+                        UIImpactFeedbackGenerator(style: kind.hapticStyle).impactOccurred()
+                    } label: {
+                        Image(systemName: kind.systemImage)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(penKind == kind ? Color.Ink.primary : Color.Ink.secondary)
+                            .frame(width: compactLayout ? 42 : 54, height: 32)
+                            .background(
+                                Color.Surface.fill,
+                                in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
+                                    .stroke(penKind == kind ? Color.accentColor : Color.Rule.hairline,
+                                            lineWidth: penKind == kind ? 2 : 0.8)
+                            )
                     }
-
-                    ColorPicker("", selection: $color, supportsOpacity: false)
-                        .labelsHidden()
-                        .frame(width: 34, height: 28)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(kind.label)
                 }
             }
         }
-        .frame(width: 260)
+    }
+
+    private var markerModeSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionTitle("형광펜 모드")
+            markerModeToggle(title: "잉크 스트로크", systemImage: "scribble", keyPath: \.inkEnabled)
+            markerModeToggle(title: "텍스트 하이라이트", systemImage: "highlighter", keyPath: \.highlightEnabled)
+            markerModeToggle(title: "영역 선택", systemImage: "rectangle.dashed", keyPath: \.regionEnabled)
+        }
+    }
+
+    private func markerModeToggle(title: String,
+                                  systemImage: String,
+                                  keyPath: WritableKeyPath<MarkerSubmode, Bool>) -> some View {
+        Toggle(isOn: Binding(
+            get: { markerSubmode[keyPath: keyPath] },
+            set: { newValue in
+                var updated = markerSubmode
+                updated[keyPath: keyPath] = newValue
+                onSetMarkerSubmode(updated)
+            }
+        )) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 18)
+                Text(title)
+                    .font(.system(size: 14))
+            }
+            .foregroundStyle(Color.Ink.primary)
+        }
+        .toggleStyle(.switch)
+        .controlSize(.small)
+    }
+
+    private var widthSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("굵기")
+
+            Slider(value: steppedWidth, in: widthRange, step: fineStep)
+                .frame(width: editorWidth - 12)
+
+            HStack(spacing: 6) {
+                widthStepButton(label: "-1", delta: -1)
+                widthStepButton(label: "-0.1", delta: -0.1)
+                widthStepButton(label: "+0.1", delta: 0.1)
+                widthStepButton(label: "+1", delta: 1)
+            }
+        }
+    }
+
+    private var colorSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("색상")
+
+            HStack(spacing: 8) {
+                ForEach(Array(visiblePresetColors.enumerated()), id: \.offset) { _, presetColor in
+                    Button {
+                        color = presetColor
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        Circle()
+                            .fill(presetColor)
+                            .frame(width: 24, height: 24)
+                            .overlay(
+                                Circle()
+                                    .stroke(isSelected(presetColor) ? Color.accentColor : Color.Rule.hairline,
+                                            lineWidth: isSelected(presetColor) ? 2.2 : 0.8)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                ColorPicker("", selection: $color, supportsOpacity: false)
+                    .labelsHidden()
+                    .frame(width: 34, height: 28)
+            }
+        }
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Color.Ink.secondary)
     }
 
     private var steppedWidth: Binding<CGFloat> {
@@ -1527,6 +1552,30 @@ private struct PencilSettingsEditor: View {
         String(format: "%.1f pt", Double(roundedToFineStep(width)))
     }
 
+    private var headerTitle: String {
+        tool == .pen ? penKind.label : tool.label
+    }
+
+    private var headerSystemImage: String {
+        tool == .pen ? penKind.systemImage : tool.systemImage
+    }
+
+    private var compactLayout: Bool {
+        horizontalSizeClass == .compact
+    }
+
+    private var editorWidth: CGFloat {
+        compactLayout ? 228 : 260
+    }
+
+    private var visiblePresetColors: [Color] {
+        Array(presetColors.prefix(compactLayout ? 4 : 6))
+    }
+
+    private var stepButtonWidth: CGFloat {
+        compactLayout ? 50 : 58
+    }
+
     private func widthStepButton(label: String, delta: CGFloat) -> some View {
         Button {
             width = clamped(roundedToFineStep(width + delta))
@@ -1536,7 +1585,7 @@ private struct PencilSettingsEditor: View {
                 .font(.system(size: 12, weight: .semibold))
                 .monospacedDigit()
                 .foregroundStyle(Color.Ink.primary)
-                .frame(width: 58, height: 30)
+                .frame(width: stepButtonWidth, height: 30)
                 .background(Color.Surface.fill, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
@@ -1544,7 +1593,7 @@ private struct PencilSettingsEditor: View {
                 )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("연필 굵기 \(label) pt")
+        .accessibilityLabel("\(tool.label) 굵기 \(label) pt")
     }
 
     private func roundedToFineStep(_ value: CGFloat) -> CGFloat {
