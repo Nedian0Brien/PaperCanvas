@@ -73,6 +73,16 @@ enum ToolKind: String, CaseIterable, Identifiable, Codable {
         case .lasso:  return .soft
         }
     }
+
+    var defaultInkTool: InkTool {
+        switch self {
+        case .pen:    return .pen
+        case .marker: return .marker
+        case .pencil: return .pencil
+        case .eraser: return .eraser
+        case .lasso:  return .pen
+        }
+    }
 }
 
 enum PenKind: String, CaseIterable, Identifiable, Codable {
@@ -296,6 +306,10 @@ final class PaletteState {
         }
     }
 
+    var toolSettings: InkToolSettings {
+        activeToolSettings
+    }
+
     var color: Color = .black {
         didSet { save() }
     }
@@ -343,6 +357,16 @@ final class PaletteState {
         uniqueKeysWithValues: PenKind.allCases.map { ($0, Array($0.widthSteps.prefix(3))) }
     )
     private var colorSlots: [Color] = Array(Color.defaultPresets.prefix(3))
+    private var toolSettingsByTool: [ToolKind: InkToolSettings] = Dictionary(
+        uniqueKeysWithValues: ToolKind.allCases.map { kind in
+            (kind, InkToolSettings.defaultSettings(for: kind.defaultInkTool))
+        }
+    )
+    private var toolSettingsByPenKind: [PenKind: InkToolSettings] = Dictionary(
+        uniqueKeysWithValues: PenKind.allCases.map { kind in
+            (kind, InkToolSettings.defaultSettings(for: kind.inkTool))
+        }
+    )
 
     init() { load() }
 
@@ -393,6 +417,64 @@ final class PaletteState {
         guard markerSubmode != submode else { return }
         markerSubmode = submode
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    func setToolSettings(_ settings: InkToolSettings, for tool: ToolKind) {
+        let clamped = settings.clamped
+        if tool == .pen {
+            guard activeToolSettings != clamped else { return }
+            toolSettingsByPenKind[penKind] = clamped
+        } else {
+            guard (toolSettingsByTool[tool] ?? InkToolSettings.defaultSettings(for: tool.defaultInkTool)) != clamped else { return }
+            toolSettingsByTool[tool] = clamped
+        }
+        save()
+    }
+
+    func setPressureSensitivity(_ value: CGFloat, for tool: ToolKind) {
+        var settings = settings(for: tool)
+        settings.pressureSensitivity = value
+        setToolSettings(settings, for: tool)
+    }
+
+    func setTextureStrength(_ value: CGFloat, for tool: ToolKind) {
+        var settings = settings(for: tool)
+        settings.textureStrength = value
+        setToolSettings(settings, for: tool)
+    }
+
+    func settings(for tool: ToolKind) -> InkToolSettings {
+        if tool == .pen {
+            return toolSettingsByPenKind[penKind] ?? InkToolSettings.defaultSettings(for: penKind.inkTool)
+        }
+        return toolSettingsByTool[tool] ?? InkToolSettings.defaultSettings(for: tool.defaultInkTool)
+    }
+
+    func settings(for inkTool: InkTool) -> InkToolSettings {
+        switch inkTool {
+        case .gelPen:
+            return toolSettingsByPenKind[.gelPen] ?? InkToolSettings.defaultSettings(for: inkTool)
+        case .fountainPen:
+            return toolSettingsByPenKind[.fountainPen] ?? InkToolSettings.defaultSettings(for: inkTool)
+        case .brushPen:
+            return toolSettingsByPenKind[.brushPen] ?? InkToolSettings.defaultSettings(for: inkTool)
+        case .pen:
+            return toolSettingsByPenKind[penKind] ?? InkToolSettings.defaultSettings(for: inkTool)
+        case .pencil:
+            return toolSettingsByTool[.pencil] ?? InkToolSettings.defaultSettings(for: inkTool)
+        case .marker, .highlighter:
+            return toolSettingsByTool[.marker] ?? InkToolSettings.defaultSettings(for: inkTool)
+        case .eraser:
+            return toolSettingsByTool[.eraser] ?? InkToolSettings.defaultSettings(for: inkTool)
+        }
+    }
+
+    func settings(for kind: PenKind) -> InkToolSettings {
+        toolSettingsByPenKind[kind] ?? InkToolSettings.defaultSettings(for: kind.inkTool)
+    }
+
+    private var activeToolSettings: InkToolSettings {
+        settings(for: tool)
     }
 
     func setPresetColor(_ color: Color, atIndex index: Int) {
@@ -570,6 +652,8 @@ final class PaletteState {
         var colorSlots: [ColorComponents]?
         var customColorHistory: [ColorComponents]?
         var presetColors: [ColorComponents]
+        var toolSettingsByTool: [String: InkToolSettings]?
+        var toolSettingsByPenKind: [String: InkToolSettings]?
     }
 
     private func save() {
@@ -586,7 +670,9 @@ final class PaletteState {
             penWidthSlots: Dictionary(uniqueKeysWithValues: penWidthSlots.map { ($0.key.rawValue, $0.value) }),
             colorSlots: colorSlots.map { ColorComponents.from($0) },
             customColorHistory: customColorHistory.map { ColorComponents.from($0) },
-            presetColors: presetColors.map { ColorComponents.from($0) }
+            presetColors: presetColors.map { ColorComponents.from($0) },
+            toolSettingsByTool: Dictionary(uniqueKeysWithValues: toolSettingsByTool.map { ($0.key.rawValue, $0.value.clamped) }),
+            toolSettingsByPenKind: Dictionary(uniqueKeysWithValues: toolSettingsByPenKind.map { ($0.key.rawValue, $0.value.clamped) })
         )
         if let data = try? JSONEncoder().encode(snap) {
             UserDefaults.standard.set(data, forKey: Self.storeKey)
@@ -625,6 +711,20 @@ final class PaletteState {
                     penWidthSlots[kind] = normalizedSlots(v,
                                                           defaults: kind.widthSteps,
                                                           range: kind.widthRange)
+                }
+            }
+        }
+        if let savedToolSettings = snap.toolSettingsByTool {
+            for (k, v) in savedToolSettings {
+                if let kind = ToolKind(rawValue: k) {
+                    toolSettingsByTool[kind] = v.clamped
+                }
+            }
+        }
+        if let savedPenToolSettings = snap.toolSettingsByPenKind {
+            for (k, v) in savedPenToolSettings {
+                if let kind = PenKind(rawValue: k) {
+                    toolSettingsByPenKind[kind] = v.clamped
                 }
             }
         }

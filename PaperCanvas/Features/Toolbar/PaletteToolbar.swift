@@ -143,13 +143,22 @@ struct PaletteToolbar: View {
 
     private var toolSegments: [SegmentedPaletteItem] {
         ToolKind.allCases.map { kind in
-            let systemName = kind == .pen ? palette.penKind.systemImage : kind.systemImage
-            return SegmentedPaletteItem(
+            SegmentedPaletteItem(
                 id: kind.id,
-                image: UIImage(systemName: systemName),
+                image: toolSegmentImage(for: kind),
                 accessibilityLabel: toolLabel(for: kind)
             )
         }
+    }
+
+    private func toolSegmentImage(for kind: ToolKind) -> UIImage? {
+        guard kind == .pen else {
+            return UIImage(systemName: kind.systemImage)
+        }
+        if palette.penKind.usesCustomToolbarIcon {
+            return UIImage.fountainPenNibSegmentImage()
+        }
+        return UIImage(systemName: palette.penKind.systemImage)
     }
 
     private func selectTool(_ kind: ToolKind) {
@@ -286,6 +295,8 @@ struct PaletteToolbar: View {
             widthRange: widthRange(for: tool),
             color: drawingToolColorBinding,
             presetColors: palette.presetColors,
+            pressureSensitivity: pressureSensitivityBinding(for: tool),
+            textureStrength: textureStrengthBinding(for: tool),
             markerSubmode: palette.markerSubmode,
             onSelectPenKind: { palette.setPenKind($0) },
             onSetMarkerSubmode: { palette.setMarkerSubmode($0) }
@@ -303,6 +314,20 @@ struct PaletteToolbar: View {
         Binding(
             get: { palette.color },
             set: { palette.setSelectedColor($0) }
+        )
+    }
+
+    private func pressureSensitivityBinding(for tool: ToolKind) -> Binding<CGFloat> {
+        Binding(
+            get: { palette.settings(for: tool).pressureSensitivity },
+            set: { palette.setPressureSensitivity($0, for: tool) }
+        )
+    }
+
+    private func textureStrengthBinding(for tool: ToolKind) -> Binding<CGFloat> {
+        Binding(
+            get: { palette.settings(for: tool).textureStrength },
+            set: { palette.setTextureStrength($0, for: tool) }
         )
     }
 
@@ -1163,6 +1188,48 @@ private extension UIImage {
         return image.withRenderingMode(renderingMode)
     }
 
+    static func fountainPenNibSegmentImage() -> UIImage {
+        let size = CGSize(width: 24, height: 24)
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            let rect = CGRect(x: 4, y: 3, width: 16, height: 18)
+            let inset = min(rect.width, rect.height) * 0.08
+            let minX = rect.minX + inset
+            let maxX = rect.maxX - inset
+            let minY = rect.minY + inset
+            let maxY = rect.maxY - inset
+            let midX = rect.midX
+            let shoulderY = minY + rect.height * 0.43
+            let breatherRadius = rect.width * 0.11
+            let path = UIBezierPath()
+
+            path.move(to: CGPoint(x: midX, y: maxY))
+            path.addLine(to: CGPoint(x: minX, y: shoulderY))
+            path.addLine(to: CGPoint(x: midX, y: minY))
+            path.addLine(to: CGPoint(x: maxX, y: shoulderY))
+            path.close()
+            path.move(to: CGPoint(x: midX, y: minY + rect.height * 0.20))
+            path.addLine(to: CGPoint(x: midX, y: maxY - rect.height * 0.22))
+            path.move(to: CGPoint(x: midX, y: maxY))
+            path.addLine(to: CGPoint(x: midX - rect.width * 0.12, y: maxY - rect.height * 0.18))
+            path.move(to: CGPoint(x: midX, y: maxY))
+            path.addLine(to: CGPoint(x: midX + rect.width * 0.12, y: maxY - rect.height * 0.18))
+            path.append(UIBezierPath(ovalIn: CGRect(
+                x: midX - breatherRadius,
+                y: shoulderY + rect.height * 0.08,
+                width: breatherRadius * 2,
+                height: breatherRadius * 2
+            )))
+            UIColor.label.setStroke()
+            path.lineWidth = 2.1
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
+        }
+        return image.withRenderingMode(.alwaysTemplate)
+    }
+
     static func segmentModeImage(systemName: String,
                                  title: String,
                                  traitCollection: UITraitCollection) -> UIImage {
@@ -1371,6 +1438,8 @@ private struct DrawingToolSettingsEditor: View {
     let widthRange: ClosedRange<CGFloat>
     @Binding var color: Color
     let presetColors: [Color]
+    @Binding var pressureSensitivity: CGFloat
+    @Binding var textureStrength: CGFloat
     let markerSubmode: MarkerSubmode
     let onSelectPenKind: (PenKind) -> Void
     let onSetMarkerSubmode: (MarkerSubmode) -> Void
@@ -1391,6 +1460,10 @@ private struct DrawingToolSettingsEditor: View {
             }
 
             widthSection
+            pressureSection
+            if tool == .pencil {
+                textureSection
+            }
             colorSection
         }
         .frame(width: editorWidth)
@@ -1398,8 +1471,7 @@ private struct DrawingToolSettingsEditor: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: headerSystemImage)
-                .font(.system(size: 17, weight: .semibold))
+            toolGlyph
                 .foregroundStyle(Color.Ink.primary)
                 .frame(width: 30, height: 30)
                 .background(Color.Surface.fill, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
@@ -1436,8 +1508,7 @@ private struct DrawingToolSettingsEditor: View {
                         onSelectPenKind(kind)
                         UIImpactFeedbackGenerator(style: kind.hapticStyle).impactOccurred()
                     } label: {
-                        Image(systemName: kind.systemImage)
-                            .font(.system(size: 14, weight: .semibold))
+                        penKindGlyph(kind)
                             .foregroundStyle(penKind == kind ? Color.Ink.primary : Color.Ink.secondary)
                             .frame(width: compactLayout ? 42 : 54, height: 32)
                             .background(
@@ -1506,6 +1577,36 @@ private struct DrawingToolSettingsEditor: View {
         }
     }
 
+    private var pressureSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                sectionTitle("압력 민감도")
+                Spacer(minLength: 8)
+                Text(String(format: "%.2f", Double(pressureSensitivity)))
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.Ink.secondary)
+            }
+            Slider(value: pressureBinding, in: 0...2, step: 0.05)
+                .frame(width: editorWidth - 12)
+        }
+    }
+
+    private var textureSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                sectionTitle("질감")
+                Spacer(minLength: 8)
+                Text(String(format: "%.2f", Double(textureStrength)))
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.Ink.secondary)
+            }
+            Slider(value: textureBinding, in: 0...1, step: 0.05)
+                .frame(width: editorWidth - 12)
+        }
+    }
+
     private var colorSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("색상")
@@ -1541,10 +1642,46 @@ private struct DrawingToolSettingsEditor: View {
             .foregroundStyle(Color.Ink.secondary)
     }
 
+    @ViewBuilder
+    private var toolGlyph: some View {
+        if tool == .pen {
+            penKindGlyph(penKind)
+        } else {
+            Image(systemName: headerSystemImage)
+                .font(.system(size: 17, weight: .semibold))
+        }
+    }
+
+    @ViewBuilder
+    private func penKindGlyph(_ kind: PenKind) -> some View {
+        if kind.usesCustomToolbarIcon {
+            FountainPenNibIcon()
+                .stroke(style: StrokeStyle(lineWidth: 2.1, lineCap: .round, lineJoin: .round))
+                .frame(width: 17, height: 17)
+        } else {
+            Image(systemName: kind.systemImage)
+                .font(.system(size: 14, weight: .semibold))
+        }
+    }
+
     private var steppedWidth: Binding<CGFloat> {
         Binding(
             get: { roundedToFineStep(width) },
             set: { width = clamped(roundedToFineStep($0)) }
+        )
+    }
+
+    private var pressureBinding: Binding<CGFloat> {
+        Binding(
+            get: { pressureSensitivity },
+            set: { pressureSensitivity = min(max($0, 0), 2) }
+        )
+    }
+
+    private var textureBinding: Binding<CGFloat> {
+        Binding(
+            get: { textureStrength },
+            set: { textureStrength = min(max($0, 0), 1) }
         )
     }
 

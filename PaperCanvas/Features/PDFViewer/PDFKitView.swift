@@ -532,10 +532,12 @@ struct PDFKitView: UIViewRepresentable {
             clearActiveLassoState()
             hoverIndicatorView?.hide()
 
+            let inkTool = currentInkTool
             activeStroke = InkStroke(
-                tool: currentInkTool,
+                tool: inkTool,
                 color: currentInkColor,
                 baseWidth: parent.palette.width,
+                toolSettings: parent.palette.settings(for: inkTool),
                 points: [sample.point]
             )
             if currentInkTool == .eraser {
@@ -567,7 +569,8 @@ struct PDFKitView: UIViewRepresentable {
             guard didAppend else { return }
             stroke.boundingBox = InkStroke.computeBoundingBox(
                 for: stroke.points,
-                baseWidth: stroke.baseWidth
+                baseWidth: stroke.baseWidth,
+                toolSettings: stroke.toolSettings
             )
             activeStroke = stroke
             if stroke.tool == .eraser, parent.palette.eraserMode == .pixel {
@@ -1275,6 +1278,7 @@ struct PDFKitView: UIViewRepresentable {
                     tool: stroke.tool,
                     color: stroke.color,
                     baseWidth: stroke.baseWidth,
+                    toolSettings: stroke.toolSettings,
                     points: points
                 )
             }
@@ -1466,6 +1470,7 @@ struct PDFKitView: UIViewRepresentable {
                 tool: stroke.tool,
                 baseWidth: stroke.baseWidth,
                 renderedWidth: renderedWidth,
+                toolSettings: stroke.toolSettings,
                 samples: viewSamples
             )
         }
@@ -1896,6 +1901,8 @@ private struct PDFInkOutlineCacheKey: Hashable {
     var lastX: Double
     var lastY: Double
     var lastForce: Double
+    var pressureSensitivity: Double
+    var textureStrength: Double
 
     init(stroke: InkStroke) {
         let last = stroke.points.last
@@ -1910,6 +1917,8 @@ private struct PDFInkOutlineCacheKey: Hashable {
         lastX = Double(last?.location.x ?? 0)
         lastY = Double(last?.location.y ?? 0)
         lastForce = Double(last?.force ?? 0)
+        pressureSensitivity = Double(stroke.toolSettings.pressureSensitivity)
+        textureStrength = Double(stroke.toolSettings.textureStrength)
     }
 }
 
@@ -1940,6 +1949,7 @@ private struct RenderedPDFInkStroke {
     var tool: InkTool
     var baseWidth: CGFloat
     var renderedWidth: CGFloat
+    var toolSettings: InkToolSettings
     var samples: [RenderedPDFInkSample]
 }
 
@@ -2011,6 +2021,7 @@ private final class PDFInkRenderView: UIView {
             return
         }
 
+        let texture = stroke.toolSettings.clamped.textureStrength
         context.saveGState()
         context.addPath(stroke.path)
         context.clip()
@@ -2018,21 +2029,27 @@ private final class PDFInkRenderView: UIView {
         context.setLineCap(.round)
         context.setLineJoin(.round)
 
-        for pass in 0..<3 {
-            let passAlpha = stroke.opacity * (pass == 0 ? 0.20 : 0.12)
+        let passCount = texture < 0.12 ? 2 : 3
+        for pass in 0..<passCount {
+            let baseAlpha: CGFloat = pass == 0 ? 0.20 : 0.12
+            let passAlpha = stroke.opacity * baseAlpha * (0.72 + texture * 0.36)
             context.setStrokeColor(stroke.color.withAlphaComponent(passAlpha).cgColor)
-            drawPencilCenterline(stroke, pass: pass, in: context)
+            drawPencilCenterline(stroke, pass: pass, texture: texture, in: context)
         }
 
-        context.setFillColor(stroke.color.withAlphaComponent(stroke.opacity * 0.16).cgColor)
-        drawPencilGrain(stroke, in: context)
+        if texture > 0.01 {
+            let grainAlpha = stroke.opacity * (0.05 + texture * 0.11)
+            context.setFillColor(stroke.color.withAlphaComponent(grainAlpha).cgColor)
+            drawPencilGrain(stroke, texture: texture, in: context)
+        }
         context.restoreGState()
     }
 
     private func drawPencilFallback(_ stroke: RenderedPDFInkStroke, in context: CGContext) {
+        let texture = stroke.toolSettings.clamped.textureStrength
         context.saveGState()
         context.setBlendMode(.multiply)
-        context.setAlpha(stroke.opacity * 0.34)
+        context.setAlpha(stroke.opacity * (0.28 + texture * 0.08))
         context.setFillColor(stroke.color.cgColor)
         context.addPath(stroke.path)
         context.fillPath()
@@ -2041,18 +2058,21 @@ private final class PDFInkRenderView: UIView {
 
     private func drawPencilCenterline(_ stroke: RenderedPDFInkStroke,
                                       pass: Int,
+                                      texture: CGFloat,
                                       in context: CGContext) {
         let samples = stroke.samples
         guard let first = samples.first else { return }
         let width = max(stroke.renderedWidth, stroke.baseWidth)
-        let passOffset = CGFloat(pass - 1) * max(0.35, min(width * 0.16, 1.8))
-        context.setLineWidth(max(0.45, min(width * (0.24 + CGFloat(pass) * 0.055), 2.8)))
+        let jitterScale = 0.25 + texture * 0.75
+        let passOffset = CGFloat(pass - 1) * max(0.25, min(width * (0.08 + texture * 0.08), 1.8))
+        context.setLineWidth(max(0.45, min(width * (0.24 + CGFloat(pass) * 0.045 + texture * 0.03), 2.8)))
         context.beginPath()
         context.move(to: jitteredPencilPoint(first.location,
                                              index: 0,
                                              pass: pass,
                                              normal: .zero,
-                                             offset: passOffset))
+                                             offset: passOffset,
+                                             scale: jitterScale))
 
         var drewSegment = false
         for index in samples.indices.dropFirst() {
@@ -2066,8 +2086,9 @@ private final class PDFInkRenderView: UIView {
                                             index: index,
                                             pass: pass,
                                             normal: normal,
-                                            offset: passOffset)
-            if (index + pass) % 13 == 0 {
+                                            offset: passOffset,
+                                            scale: jitterScale)
+            if texture > 0.35, (index + pass) % 13 == 0 {
                 context.strokePath()
                 context.beginPath()
                 context.move(to: point)
@@ -2081,16 +2102,16 @@ private final class PDFInkRenderView: UIView {
         }
     }
 
-    private func drawPencilGrain(_ stroke: RenderedPDFInkStroke, in context: CGContext) {
+    private func drawPencilGrain(_ stroke: RenderedPDFInkStroke, texture: CGFloat, in context: CGContext) {
         let samples = stroke.samples
         let width = max(stroke.renderedWidth, stroke.baseWidth)
-        let radius = max(1.1, min(width * 0.68, 8.0))
-        let dotSize = max(0.42, min(width * 0.16, 1.45))
+        let radius = max(0.8, min(width * (0.36 + texture * 0.32), 8.0))
+        let dotSize = max(0.32, min(width * (0.09 + texture * 0.10), 1.55))
         for index in samples.indices {
             guard index % 2 == 0 else { continue }
             let sample = samples[index]
             let pressure = max(0.15, min(sample.force, 1))
-            let dotCount = max(2, min(Int(width * pressure * 1.7), 12))
+            let dotCount = max(1, min(Int(width * pressure * (0.45 + texture * 1.45)), 12))
             for dot in 0..<dotCount {
                 let seed = CGFloat(((index + 1) * 73 + dot * 29) % 101) / 100
                 let seed2 = CGFloat(((index + 1) * 41 + dot * 53) % 101) / 100
@@ -2100,7 +2121,7 @@ private final class PDFInkRenderView: UIView {
                     x: sample.location.x + cos(angle) * distance,
                     y: sample.location.y + sin(angle) * distance
                 )
-                let size = dotSize * (0.75 + seed * 0.7)
+                let size = dotSize * (0.75 + seed * (0.35 + texture * 0.45))
                 context.fillEllipse(in: CGRect(x: center.x - size * 0.5,
                                                y: center.y - size * 0.5,
                                                width: size,
@@ -2113,9 +2134,10 @@ private final class PDFInkRenderView: UIView {
                                      index: Int,
                                      pass: Int,
                                      normal: CGPoint,
-                                     offset: CGFloat) -> CGPoint {
+                                     offset: CGFloat,
+                                     scale: CGFloat) -> CGPoint {
         let seed = CGFloat(((index + 1) * 31 + pass * 17) % 19) / 18 - 0.5
-        let jitter = seed * 0.7 + offset
+        let jitter = seed * 0.7 * scale + offset
         return CGPoint(x: point.x + normal.x * jitter,
                        y: point.y + normal.y * jitter)
     }
@@ -2255,7 +2277,11 @@ extension InkStroke {
             translatedPoint.location.y += delta.dy
             return translatedPoint
         }
-        copy.boundingBox = Self.computeBoundingBox(for: copy.points, baseWidth: copy.baseWidth)
+        copy.boundingBox = Self.computeBoundingBox(
+            for: copy.points,
+            baseWidth: copy.baseWidth,
+            toolSettings: copy.toolSettings
+        )
         return copy
     }
 }

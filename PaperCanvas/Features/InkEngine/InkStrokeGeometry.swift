@@ -70,6 +70,7 @@ enum InkStrokeGeometry {
             },
             tool: stroke.tool,
             baseWidth: stroke.baseWidth,
+            toolSettings: stroke.toolSettings,
             isComplete: isComplete
         )
     }
@@ -77,7 +78,9 @@ enum InkStrokeGeometry {
     static func outline(for samples: [InkRenderSample],
                         tool: InkTool,
                         baseWidth: CGFloat,
+                        toolSettings: InkToolSettings? = nil,
                         isComplete: Bool = true) -> InkStrokeOutline? {
+        let settings = (toolSettings ?? InkToolSettings.defaultSettings(for: tool)).clamped
         let samples = streamlinedSamples(
             filteredSamples(samples, baseWidth: baseWidth),
             tool: tool
@@ -85,7 +88,7 @@ enum InkStrokeGeometry {
         guard !samples.isEmpty else { return nil }
 
         if samples.count == 1 {
-            let radius = width(for: samples[0], at: 0, in: samples, tool: tool, baseWidth: baseWidth) * 0.5
+            let radius = width(for: samples[0], at: 0, in: samples, tool: tool, baseWidth: baseWidth, toolSettings: settings) * 0.5
             let center = samples[0].location
             let outline = InkStrokeOutline(
                 leftEdge: [CGPoint(x: center.x, y: center.y - radius)],
@@ -119,6 +122,7 @@ enum InkStrokeGeometry {
                 totalLength: totalLength,
                 tool: tool,
                 baseWidth: baseWidth,
+                toolSettings: settings,
                 isComplete: isComplete
             ) * 0.5
 
@@ -223,7 +227,8 @@ enum InkStrokeGeometry {
                               at index: Int,
                               in samples: [InkRenderSample],
                               tool: InkTool,
-                              baseWidth: CGFloat) -> CGFloat {
+                              baseWidth: CGFloat,
+                              toolSettings: InkToolSettings) -> CGFloat {
         width(
             for: sample,
             at: index,
@@ -232,6 +237,7 @@ enum InkStrokeGeometry {
             totalLength: 0,
             tool: tool,
             baseWidth: baseWidth,
+            toolSettings: toolSettings,
             isComplete: true
         )
     }
@@ -243,9 +249,10 @@ enum InkStrokeGeometry {
                               totalLength: CGFloat,
                               tool: InkTool,
                               baseWidth: CGFloat,
+                              toolSettings: InkToolSettings,
                               isComplete: Bool) -> CGFloat {
         let pressure = smoothedPressure(at: index, in: samples)
-        let curvedPressure = pow(pressure, 0.72)
+        let curvedPressure = pressureResponse(pressure, sensitivity: toolSettings.pressureSensitivity)
         let uprightAltitude = CGFloat.pi / 2
         let tilt = 1 - clamp(sample.altitude / uprightAltitude, lower: 0, upper: 1)
 
@@ -276,6 +283,12 @@ enum InkStrokeGeometry {
             isComplete: isComplete
         )
         return max(taperedWidth, minimumRenderedWidth(for: tool, baseWidth: baseWidth, isComplete: isComplete))
+    }
+
+    private static func pressureResponse(_ pressure: CGFloat, sensitivity: CGFloat) -> CGFloat {
+        let base = pow(clamp(pressure, lower: 0.05, upper: 1), 0.72)
+        let adjusted = 0.5 + (base - 0.5) * clamp(sensitivity, lower: 0, upper: 2)
+        return clamp(adjusted, lower: 0.05, upper: 1.25)
     }
 
     private static func smoothedPressure(at index: Int, in samples: [InkRenderSample]) -> CGFloat {

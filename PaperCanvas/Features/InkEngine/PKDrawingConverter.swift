@@ -149,6 +149,7 @@ enum InkLassoClipboard {
                 tool: stroke.tool,
                 color: stroke.color,
                 baseWidth: stroke.baseWidth,
+                toolSettings: stroke.toolSettings,
                 points: stroke.points,
                 boundingBox: stroke.boundingBox
             )
