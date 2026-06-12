@@ -46,11 +46,11 @@ enum ToolKind: String, CaseIterable, Identifiable, Codable {
 
     var widthRange: ClosedRange<CGFloat> {
         switch self {
-        case .pen:    return 1...20
-        case .marker: return 4...40
-        case .pencil: return 1...12
-        case .eraser: return 6...60
-        case .lasso:  return 1...20
+        case .pen:    return 0.1...20
+        case .marker: return 0.1...40
+        case .pencil: return 0.1...12
+        case .eraser: return 0.1...60
+        case .lasso:  return 0.1...20
         }
     }
 
@@ -125,10 +125,10 @@ enum PenKind: String, CaseIterable, Identifiable, Codable {
 
     var widthRange: ClosedRange<CGFloat> {
         switch self {
-        case .ballpoint:   return 1...14
-        case .gelPen:      return 1...16
-        case .fountainPen: return 1...18
-        case .brushPen:    return 2...28
+        case .ballpoint:   return 0.1...14
+        case .gelPen:      return 0.1...16
+        case .fountainPen: return 0.1...18
+        case .brushPen:    return 0.1...28
         }
     }
 
