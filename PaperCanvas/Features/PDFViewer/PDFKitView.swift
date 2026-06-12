@@ -1596,24 +1596,47 @@ struct PDFKitView: UIViewRepresentable {
             pdfView.layoutIfNeeded()
             internalScrollView?.layoutIfNeeded()
             let key = viewportKey(pdfView: pdfView)
-            guard key != lastViewportKey else { return }
-            lastViewportKey = key
-            rebuildRenderedInk()
-            refreshHoverIndicator()
-            if let inkRenderView {
-                inkRenderView.frame = pdfView.bounds
-                pdfView.bringSubviewToFront(inkRenderView)
+            let compensation = viewportPresentationCompensation()
+            if key != lastViewportKey {
+                lastViewportKey = key
+                rebuildRenderedInk()
+                refreshHoverIndicator()
+                if let inkRenderView {
+                    inkRenderView.frame = pdfView.bounds
+                    pdfView.bringSubviewToFront(inkRenderView)
+                }
+                if let overlay = anchorOverlay {
+                    overlay.frame = pdfView.bounds
+                    overlay.relayoutForViewportChange()
+                    pdfView.bringSubviewToFront(overlay)
+                }
+                if let live = liveHighlightOverlay {
+                    live.frame = pdfView.bounds
+                    live.setNeedsDisplay()
+                    pdfView.bringSubviewToFront(live)
+                }
             }
-            if let overlay = anchorOverlay {
-                overlay.frame = pdfView.bounds
-                overlay.relayoutForViewportChange()
-                pdfView.bringSubviewToFront(overlay)
+            applyViewportCompensation(compensation)
+            if compensation != .identity {
+                displayLink?.isPaused = false
             }
-            if let live = liveHighlightOverlay {
-                live.frame = pdfView.bounds
-                live.setNeedsDisplay()
-                pdfView.bringSubviewToFront(live)
-            }
+        }
+
+        private func viewportPresentationCompensation() -> CGAffineTransform {
+            guard let scrollView = internalScrollView,
+                  let presentation = scrollView.layer.presentation() else { return .identity }
+            let modelOrigin = scrollView.bounds.origin
+            let presentationOrigin = presentation.bounds.origin
+            let dx = modelOrigin.x - presentationOrigin.x
+            let dy = modelOrigin.y - presentationOrigin.y
+            guard abs(dx) > 0.05 || abs(dy) > 0.05 else { return .identity }
+            return CGAffineTransform(translationX: dx, y: dy)
+        }
+
+        private func applyViewportCompensation(_ transform: CGAffineTransform) {
+            inkRenderView?.transform = transform
+            anchorOverlay?.transform = transform
+            liveHighlightOverlay?.transform = transform
         }
 
         private func viewportKey(pdfView: PDFView) -> String {
