@@ -50,6 +50,10 @@ struct PDFKitView: UIViewRepresentable {
         let pencilInput = PDFPencilInputGestureRecognizer()
         pdfView.addGestureRecognizer(pencilInput)
 
+        let inkRenderView = PDFInkRenderView(frame: pdfView.bounds)
+        inkRenderView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        inkRenderView.isUserInteractionEnabled = false
+
         wrapper.addSubview(pdfView)
         wrapper.addSubview(hoverIndicatorView)
         NSLayoutConstraint.activate([
@@ -61,9 +65,11 @@ struct PDFKitView: UIViewRepresentable {
 
         context.coordinator.attach(wrapper: wrapper,
                                    pdfView: pdfView,
+                                   inkRenderView: inkRenderView,
                                    hoverIndicatorView: hoverIndicatorView,
                                    pencilInput: pencilInput)
         pdfView.document = document
+        pdfView.addSubview(inkRenderView)
 
         let marker = MarkerGestureController(pdfView: pdfView, palette: palette)
         marker.onRegionCaptured = { [weak coord = context.coordinator] pageIdx, rect, img in
@@ -132,7 +138,7 @@ struct PDFKitView: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, UIDragInteractionDelegate, UIPencilInteractionDelegate, @preconcurrency PDFPageOverlayViewProvider, PDFAnchorOverlayDelegate {
+    final class Coordinator: NSObject, UIDragInteractionDelegate, UIPencilInteractionDelegate, PDFAnchorOverlayDelegate {
         var parent: PDFKitView
         var lastConsumedTargetID: UUID?
         var markerGesture: MarkerGestureController?
@@ -146,6 +152,7 @@ struct PDFKitView: UIViewRepresentable {
 
         private weak var wrapper: UIView?
         weak var hostPDFView: PDFView?
+        private weak var inkRenderView: PDFInkRenderView?
         private weak var hoverIndicatorView: PencilHoverIndicatorView?
         private weak var pencilInput: PDFPencilInputGestureRecognizer?
         private weak var internalScrollView: UIScrollView?
@@ -157,7 +164,7 @@ struct PDFKitView: UIViewRepresentable {
         private var displayLink: CADisplayLink?
         private var lastViewportKey = ""
         private var lastStrokeSignature = ""
-        private var pageRenderViews: [Int: PDFInkPageRenderView] = [:]
+        private var outlineCache: [PDFInkOutlineCacheKey: CGPath] = [:]
 
         private var lastActivePageIndex: Int?
         private var lastUndoTrigger: UUID?
@@ -185,13 +192,14 @@ struct PDFKitView: UIViewRepresentable {
 
         fileprivate func attach(wrapper: UIView,
                                 pdfView: PDFView,
+                                inkRenderView: PDFInkRenderView,
                                 hoverIndicatorView: PencilHoverIndicatorView,
                                 pencilInput: PDFPencilInputGestureRecognizer) {
             self.wrapper = wrapper
             self.hostPDFView = pdfView
+            self.inkRenderView = inkRenderView
             self.hoverIndicatorView = hoverIndicatorView
             self.pencilInput = pencilInput
-            pdfView.pageOverlayViewProvider = self
             pencilInput.onTouches = { [weak self] phase, touches, event in
                 self?.handlePencilInput(phase: phase, touches: touches, event: event)
             }
@@ -241,7 +249,6 @@ struct PDFKitView: UIViewRepresentable {
         func detach() {
             stopDisplayLink()
             detachScrollObservers()
-            hostPDFView?.pageOverlayViewProvider = nil
             if let pageObserver { NotificationCenter.default.removeObserver(pageObserver) }
             if let scaleObserver { NotificationCenter.default.removeObserver(scaleObserver) }
             if let visiblePagesObserver { NotificationCenter.default.removeObserver(visiblePagesObserver) }
@@ -251,7 +258,6 @@ struct PDFKitView: UIViewRepresentable {
             pencilInput?.onTouches = nil
             hoverIndicatorView?.hide()
             clearTransientState()
-            pageRenderViews.removeAll()
         }
 
         func clearTransientState() {
@@ -267,8 +273,8 @@ struct PDFKitView: UIViewRepresentable {
             undoStack.removeAll()
             redoStack.removeAll()
             publishPDFUndoRedoState(canUndo: false, canRedo: false)
-            pageRenderViews.values.forEach { $0.clear() }
-            pageRenderViews.removeAll()
+            outlineCache.removeAll()
+            inkRenderView?.clear()
         }
 
         func syncExternalStrokesIfNeeded() {
@@ -1340,17 +1346,60 @@ struct PDFKitView: UIViewRepresentable {
             }.joined(separator: "|")
         }
 
-        // MARK: - Page-attached ink rendering
+        // MARK: - Screen-space ink rendering
 
         func rebuildRenderedInk() {
             guard let hostPDFView,
+                  let inkRenderView,
                   let document = hostPDFView.document else { return }
+            inkRenderView.frame = hostPDFView.bounds
             let visiblePages = hostPDFView.visiblePages
             let pages = visiblePages.isEmpty ? hostPDFView.currentPage.map { [$0] } ?? [] : visiblePages
+            var renderedStrokes: [RenderedPDFInkStroke] = []
+            var renderedSelections: [CGRect] = []
+            var renderedLasso: RenderedPDFInkLasso?
 
             for page in pages {
-                updateInkOverlay(for: page, in: hostPDFView, document: document)
+                let pageIndex = document.index(for: page)
+                guard pageIndex >= 0 else { continue }
+                let strokes = parent.pageInkStrokes[pageIndex] ?? []
+                let eraserPreviewIDs = eraserPreviewStrokeIDs(pageIndex: pageIndex, strokes: strokes)
+
+                renderedStrokes.append(contentsOf: renderStrokes(
+                    strokes,
+                    page: page,
+                    pdfView: hostPDFView,
+                    eraserPreviewIDs: eraserPreviewIDs
+                ))
+
+                if pageIndex == activePageIndex,
+                   let activeStroke,
+                   activeStroke.tool != .eraser,
+                   let rendered = makeRenderedStroke(
+                    activeStroke,
+                    page: page,
+                    pdfView: hostPDFView,
+                    cachesOutline: false,
+                    isComplete: false
+                   ) {
+                    renderedStrokes.append(rendered)
+                }
+
+                if let selectedRect = renderedSelectionBounds(pageIndex: pageIndex,
+                                                              page: page,
+                                                              pdfView: hostPDFView) {
+                    renderedSelections.append(selectedRect)
+                }
+
+                if pageIndex == activeLassoPageIndex,
+                   let lasso = makeRenderedLasso(page: page, pdfView: hostPDFView) {
+                    renderedLasso = lasso
+                }
             }
+
+            inkRenderView.update(strokes: renderedStrokes,
+                                 selectionRects: renderedSelections,
+                                 activeLasso: renderedLasso)
         }
 
         private func eraserPreviewStrokeIDs(pageIndex: Int, strokes: [InkStroke]) -> Set<UUID> {
@@ -1367,51 +1416,113 @@ struct PDFKitView: UIViewRepresentable {
             })
         }
 
-        private func updateInkOverlay(for page: PDFPage, in pdfView: PDFView, document: PDFDocument) {
-            let pageIndex = document.index(for: page)
-            guard pageIndex >= 0,
-                  let renderView = pageRenderViews[pageIndex] else { return }
-            let strokes = parent.pageInkStrokes[pageIndex] ?? []
-            let activeStrokeForPage: InkStroke?
-            if pageIndex == activePageIndex, activeStroke?.tool != .eraser {
-                activeStrokeForPage = activeStroke
-            } else {
-                activeStrokeForPage = nil
+        private func renderStrokes(_ strokes: [InkStroke],
+                                   page: PDFPage,
+                                   pdfView: PDFView,
+                                   eraserPreviewIDs: Set<UUID>) -> [RenderedPDFInkStroke] {
+            strokes.compactMap { stroke in
+                makeRenderedStroke(
+                    stroke,
+                    page: page,
+                    pdfView: pdfView,
+                    cachesOutline: true,
+                    isComplete: true,
+                    opacity: eraserPreviewIDs.contains(stroke.id) ? 0.28 : 1
+                )
             }
-            renderView.update(
-                strokes: strokes,
-                activeStroke: activeStrokeForPage,
-                eraserPreviewIDs: eraserPreviewStrokeIDs(pageIndex: pageIndex, strokes: strokes),
-                selectedStrokeIDs: selectedStrokeIDsByPage[pageIndex] ?? [],
-                activeLassoPoints: pageIndex == activeLassoPageIndex ? activeLassoPoints : [],
-                activeLassoMode: pageIndex == activeLassoPageIndex ? activeLassoMode : nil
+        }
+
+        private func makeRenderedStroke(_ stroke: InkStroke,
+                                        page: PDFPage,
+                                        pdfView: PDFView,
+                                        cachesOutline: Bool,
+                                        isComplete: Bool,
+                                        opacity: CGFloat = 1) -> RenderedPDFInkStroke? {
+            guard stroke.tool != .eraser,
+                  let pagePath = pageSpaceOutlinePath(
+                    for: stroke,
+                    cachesOutline: cachesOutline,
+                    isComplete: isComplete
+                  ) else { return nil }
+            var transform = pageSpaceToViewTransform(page: page, pdfView: pdfView)
+            guard let viewPath = pagePath.copy(using: &transform) else { return nil }
+            let isMarker = stroke.tool == .marker || stroke.tool == .highlighter
+            return RenderedPDFInkStroke(
+                path: viewPath,
+                color: stroke.color.uiColor,
+                blendMode: isMarker ? .multiply : .normal,
+                opacity: opacity
             )
         }
 
-        func pdfView(_ view: PDFView, overlayViewFor page: PDFPage) -> UIView? {
-            guard let document = view.document else { return nil }
-            let pageIndex = document.index(for: page)
-            guard pageIndex >= 0 else { return nil }
-
-            let renderView = PDFInkPageRenderView(page: page, displayBox: view.displayBox)
-            pageRenderViews[pageIndex] = renderView
-            updateInkOverlay(for: page, in: view, document: document)
-            return renderView
-        }
-
-        func pdfView(_ pdfView: PDFView, willDisplayOverlayView overlayView: UIView, for page: PDFPage) {
-            guard let document = pdfView.document else { return }
-            updateInkOverlay(for: page, in: pdfView, document: document)
-        }
-
-        func pdfView(_ pdfView: PDFView, willEndDisplayingOverlayView overlayView: UIView, for page: PDFPage) {
-            guard let document = pdfView.document else { return }
-            let pageIndex = document.index(for: page)
-            if pageIndex >= 0,
-               let currentRenderView = pageRenderViews[pageIndex],
-               currentRenderView === overlayView {
-                pageRenderViews.removeValue(forKey: pageIndex)
+        private func pageSpaceOutlinePath(for stroke: InkStroke,
+                                          cachesOutline: Bool,
+                                          isComplete: Bool) -> CGPath? {
+            if cachesOutline {
+                let key = PDFInkOutlineCacheKey(stroke: stroke)
+                if let cached = outlineCache[key] { return cached }
+                guard let outline = InkStrokeGeometry.outline(for: stroke, isComplete: isComplete) else { return nil }
+                let path = outline.makeClosedPath()
+                outlineCache[key] = path
+                return path
             }
+            guard let outline = InkStrokeGeometry.outline(for: stroke, isComplete: isComplete) else { return nil }
+            return outline.makeClosedPath()
+        }
+
+        private func renderedSelectionBounds(pageIndex: Int,
+                                             page: PDFPage,
+                                             pdfView: PDFView) -> CGRect? {
+            guard let selectedIDs = selectedStrokeIDsByPage[pageIndex],
+                  !selectedIDs.isEmpty else { return nil }
+            var union: CGRect?
+            for stroke in parent.pageInkStrokes[pageIndex] ?? [] where selectedIDs.contains(stroke.id) {
+                union = union.map { $0.union(stroke.boundingBox) } ?? stroke.boundingBox
+            }
+            guard let bounds = union?.insetBy(dx: -6, dy: -6) else { return nil }
+            return bounds.applying(pageSpaceToViewTransform(page: page, pdfView: pdfView)).standardized
+        }
+
+        private func makeRenderedLasso(page: PDFPage, pdfView: PDFView) -> RenderedPDFInkLasso? {
+            guard let activeLassoMode,
+                  !activeLassoPoints.isEmpty else { return nil }
+            let transform = pageSpaceToViewTransform(page: page, pdfView: pdfView)
+            switch activeLassoMode {
+            case .rectangle:
+                guard let first = activeLassoPoints.first?.location,
+                      let last = activeLassoPoints.last?.location else { return nil }
+                let rect = CGRect(
+                    x: min(first.x, last.x),
+                    y: min(first.y, last.y),
+                    width: abs(first.x - last.x),
+                    height: abs(first.y - last.y)
+                ).applying(transform).standardized
+                return .rectangle(rect)
+            case .freeform:
+                let points = activeLassoPoints.map { $0.location.applying(transform) }
+                guard let first = points.first else { return nil }
+                let path = UIBezierPath()
+                path.move(to: first)
+                for point in points.dropFirst() {
+                    path.addLine(to: point)
+                }
+                return .freeform(path.cgPath)
+            }
+        }
+
+        private func pageSpaceToViewTransform(page: PDFPage, pdfView: PDFView) -> CGAffineTransform {
+            let pageBounds = page.bounds(for: .mediaBox)
+            let origin = pdfView.convert(CGPoint(x: pageBounds.minX, y: pageBounds.maxY), from: page)
+            let xUnit = pdfView.convert(CGPoint(x: pageBounds.minX + 1, y: pageBounds.maxY), from: page)
+            let yUnit = pdfView.convert(CGPoint(x: pageBounds.minX, y: pageBounds.maxY - 1), from: page)
+            return CGAffineTransform(
+                a: xUnit.x - origin.x,
+                b: xUnit.y - origin.y,
+                c: yUnit.x - origin.x,
+                d: yUnit.y - origin.y,
+                tx: origin.x,
+                ty: origin.y
+            )
         }
 
         // MARK: - Touch activation
@@ -1476,6 +1587,10 @@ struct PDFKitView: UIViewRepresentable {
                 lastViewportKey = key
                 rebuildRenderedInk()
                 refreshHoverIndicator()
+                if let inkRenderView {
+                    inkRenderView.frame = hostPDFView.bounds
+                    hostPDFView.bringSubviewToFront(inkRenderView)
+                }
                 if let overlay = anchorOverlay {
                     overlay.frame = hostPDFView.bounds
                     overlay.relayoutForViewportChange()
@@ -1765,22 +1880,25 @@ private final class PaperCanvasPDFView: PDFView {
     }
 }
 
-private final class PDFInkPageRenderView: UIView {
-    private weak var page: PDFPage?
-    private let displayBox: PDFDisplayBox
-    private var strokes: [InkStroke] = []
-    private var activeStroke: InkStroke?
-    private var eraserPreviewIDs: Set<UUID> = []
-    private var selectedStrokeIDs: Set<UUID> = []
-    private var activeLassoPoints: [InkPoint] = []
-    private var activeLassoMode: LassoMode?
-    private var outlineCache: [PDFInkOutlineCacheKey: CGPath] = [:]
-    private var lastBoundsSize: CGSize = .zero
+private struct RenderedPDFInkStroke {
+    var path: CGPath
+    var color: UIColor
+    var blendMode: CGBlendMode
+    var opacity: CGFloat
+}
 
-    init(page: PDFPage, displayBox: PDFDisplayBox) {
-        self.page = page
-        self.displayBox = displayBox
-        super.init(frame: .zero)
+private enum RenderedPDFInkLasso {
+    case rectangle(CGRect)
+    case freeform(CGPath)
+}
+
+private final class PDFInkRenderView: UIView {
+    private var strokes: [RenderedPDFInkStroke] = []
+    private var selectionRects: [CGRect] = []
+    private var activeLasso: RenderedPDFInkLasso?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
         backgroundColor = .clear
         isOpaque = false
         contentMode = .redraw
@@ -1792,172 +1910,69 @@ private final class PDFInkPageRenderView: UIView {
         fatalError("init(coder:) not implemented")
     }
 
+    func update(strokes: [RenderedPDFInkStroke],
+                selectionRects: [CGRect],
+                activeLasso: RenderedPDFInkLasso?) {
+        self.strokes = strokes
+        self.selectionRects = selectionRects
+        self.activeLasso = activeLasso
+        setNeedsDisplay()
+    }
+
+    func clear() {
+        strokes = []
+        selectionRects = []
+        activeLasso = nil
+        setNeedsDisplay()
+    }
+
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         context.setAllowsAntialiasing(true)
         context.setShouldAntialias(true)
 
         for stroke in strokes {
-            draw(stroke, isComplete: true, opacity: eraserPreviewIDs.contains(stroke.id) ? 0.28 : 1, in: context)
+            context.saveGState()
+            context.setBlendMode(stroke.blendMode)
+            context.setAlpha(stroke.opacity)
+            context.setFillColor(stroke.color.cgColor)
+            context.addPath(stroke.path)
+            context.fillPath()
+            context.restoreGState()
         }
-        if let activeStroke {
-            draw(activeStroke, isComplete: false, opacity: 1, in: context)
-        }
-        drawSelectionOverlay(in: context)
+
+        drawSelectionRects(in: context)
         drawActiveLasso(in: context)
     }
 
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        if bounds.size != lastBoundsSize {
-            lastBoundsSize = bounds.size
-            setNeedsDisplay()
-        }
-    }
-
-    func update(strokes: [InkStroke],
-                activeStroke: InkStroke?,
-                eraserPreviewIDs: Set<UUID>,
-                selectedStrokeIDs: Set<UUID>,
-                activeLassoPoints: [InkPoint],
-                activeLassoMode: LassoMode?) {
-        self.strokes = strokes
-        self.activeStroke = activeStroke
-        self.eraserPreviewIDs = eraserPreviewIDs
-        self.selectedStrokeIDs = selectedStrokeIDs
-        self.activeLassoPoints = activeLassoPoints
-        self.activeLassoMode = activeLassoMode
-        setNeedsDisplay()
-    }
-
-    func clear() {
-        strokes = []
-        activeStroke = nil
-        eraserPreviewIDs = []
-        selectedStrokeIDs = []
-        activeLassoPoints = []
-        activeLassoMode = nil
-        outlineCache.removeAll()
-        setNeedsDisplay()
-    }
-
-    private func draw(_ stroke: InkStroke,
-                      isComplete: Bool,
-                      opacity: CGFloat,
-                      in context: CGContext) {
-        guard stroke.tool != .eraser,
-              let pagePath = pageSpaceOutlinePath(for: stroke, isComplete: isComplete),
-              var transform = pageSpaceToLocalTransform(),
-              let localPath = pagePath.copy(using: &transform) else { return }
-
-        let isMarker = stroke.tool == .marker || stroke.tool == .highlighter
-        context.saveGState()
-        context.setBlendMode(isMarker ? .multiply : .normal)
-        context.setAlpha(opacity)
-        context.setFillColor(stroke.color.uiColor.cgColor)
-        context.addPath(localPath)
-        context.fillPath()
-        context.restoreGState()
-    }
-
-    private func drawSelectionOverlay(in context: CGContext) {
-        guard !selectedStrokeIDs.isEmpty,
-              var selectionBounds = selectedStrokeBounds(),
-              let transform = pageSpaceToLocalTransform() else { return }
-        selectionBounds = selectionBounds.insetBy(dx: -6, dy: -6)
-        let rect = selectionBounds.applying(transform).standardized
+    private func drawSelectionRects(in context: CGContext) {
+        guard !selectionRects.isEmpty else { return }
         context.saveGState()
         context.setStrokeColor(UIColor.systemBlue.withAlphaComponent(0.9).cgColor)
         context.setFillColor(UIColor.systemBlue.withAlphaComponent(0.08).cgColor)
         context.setLineWidth(1.5)
         context.setLineDash(phase: 0, lengths: [7, 4])
-        let path = UIBezierPath(roundedRect: rect, cornerRadius: 8).cgPath
-        context.addPath(path)
-        context.drawPath(using: .fillStroke)
+        for rect in selectionRects {
+            context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: 8).cgPath)
+            context.drawPath(using: .fillStroke)
+        }
         context.restoreGState()
     }
 
     private func drawActiveLasso(in context: CGContext) {
-        guard let activeLassoMode,
-              !activeLassoPoints.isEmpty,
-              let transform = pageSpaceToLocalTransform() else { return }
+        guard let activeLasso else { return }
         context.saveGState()
         context.setStrokeColor(UIColor.systemBlue.cgColor)
         context.setLineWidth(1.7)
         context.setLineDash(phase: 0, lengths: [6, 4])
-        switch activeLassoMode {
-        case .rectangle:
-            guard let first = activeLassoPoints.first?.location,
-                  let last = activeLassoPoints.last?.location else {
-                context.restoreGState()
-                return
-            }
-            let rect = CGRect(
-                x: min(first.x, last.x),
-                y: min(first.y, last.y),
-                width: abs(first.x - last.x),
-                height: abs(first.y - last.y)
-            ).applying(transform).standardized
+        switch activeLasso {
+        case .rectangle(let rect):
             context.stroke(rect)
-        case .freeform:
-            let points = activeLassoPoints.map { $0.location.applying(transform) }
-            guard let first = points.first else {
-                context.restoreGState()
-                return
-            }
-            let path = UIBezierPath()
-            path.move(to: first)
-            for point in points.dropFirst() {
-                path.addLine(to: point)
-            }
-            context.addPath(path.cgPath)
+        case .freeform(let path):
+            context.addPath(path)
             context.strokePath()
         }
         context.restoreGState()
-    }
-
-    private func selectedStrokeBounds() -> CGRect? {
-        var union: CGRect?
-        for stroke in strokes where selectedStrokeIDs.contains(stroke.id) {
-            union = union.map { $0.union(stroke.boundingBox) } ?? stroke.boundingBox
-        }
-        return union
-    }
-
-    private func pageSpaceOutlinePath(for stroke: InkStroke, isComplete: Bool) -> CGPath? {
-        if isComplete {
-            let key = PDFInkOutlineCacheKey(stroke: stroke)
-            if let cached = outlineCache[key] {
-                return cached
-            }
-            guard let outline = InkStrokeGeometry.outline(for: stroke, isComplete: true) else { return nil }
-            let path = outline.makeClosedPath()
-            outlineCache[key] = path
-            return path
-        }
-
-        guard let outline = InkStrokeGeometry.outline(for: stroke, isComplete: false) else { return nil }
-        return outline.makeClosedPath()
-    }
-
-    private func pageSpaceToLocalTransform() -> CGAffineTransform? {
-        guard let page else { return nil }
-        let mediaBounds = page.bounds(for: .mediaBox)
-        let displayBounds = page.bounds(for: displayBox)
-        guard mediaBounds.width > 0, mediaBounds.height > 0,
-              displayBounds.width > 0, displayBounds.height > 0,
-              bounds.width > 0, bounds.height > 0 else { return nil }
-
-        let scaleX = bounds.width / displayBounds.width
-        let scaleY = bounds.height / displayBounds.height
-        return CGAffineTransform(
-            a: scaleX,
-            b: 0,
-            c: 0,
-            d: scaleY,
-            tx: (mediaBounds.minX - displayBounds.minX) * scaleX,
-            ty: (displayBounds.maxY - mediaBounds.maxY) * scaleY
-        )
     }
 }
 
