@@ -37,7 +37,6 @@ struct PaletteToolbar: View {
     private enum PaletteEditor: Identifiable, Equatable {
         case pen
         case marker
-        case pencil
         case width(Int)
         case color(Int)
 
@@ -47,8 +46,6 @@ struct PaletteToolbar: View {
                 return "pen"
             case .marker:
                 return "marker"
-            case .pencil:
-                return "pencil"
             case .width(let index):
                 return "width-\(index)"
             case .color(let index):
@@ -111,12 +108,12 @@ struct PaletteToolbar: View {
     private var toolSelector: some View {
         RetappableSegmentedPicker(
             segments: toolSegments,
-            selectedIndex: ToolKind.allCases.firstIndex(of: palette.tool),
+            selectedIndex: visibleToolKinds.firstIndex(of: palette.tool),
             accessibilityLabel: "도구",
-            onSelect: { selectTool(ToolKind.allCases[$0]) },
-            onReselect: { handleToolReselect(ToolKind.allCases[$0]) }
+            onSelect: { selectTool(visibleToolKinds[$0]) },
+            onReselect: { handleToolReselect(visibleToolKinds[$0]) }
         )
-        .frame(width: CGFloat(ToolKind.allCases.count) * ToolbarMetrics.itemSize,
+        .frame(width: CGFloat(visibleToolKinds.count) * ToolbarMetrics.itemSize,
                height: ToolbarMetrics.itemSize)
         .popover(isPresented: penEditorPresentedBinding,
                  attachmentAnchor: .point(toolPopoverAnchor),
@@ -132,17 +129,14 @@ struct PaletteToolbar: View {
                 .padding(14)
                 .presentationCompactAdaptation(.popover)
         }
-        .popover(isPresented: pencilEditorPresentedBinding,
-                 attachmentAnchor: .point(pencilPopoverAnchor),
-                 arrowEdge: popoverArrowEdge) {
-            drawingToolSettingsEditor(for: .pencil)
-                .padding(14)
-                .presentationCompactAdaptation(.popover)
-        }
+    }
+
+    private var visibleToolKinds: [ToolKind] {
+        [.pen, .marker, .eraser, .lasso]
     }
 
     private var toolSegments: [SegmentedPaletteItem] {
-        ToolKind.allCases.map { kind in
+        visibleToolKinds.map { kind in
             SegmentedPaletteItem(
                 id: kind.id,
                 image: toolSegmentImage(for: kind),
@@ -184,12 +178,10 @@ struct PaletteToolbar: View {
 
     private func editor(for kind: ToolKind) -> PaletteEditor? {
         switch kind {
-        case .pen:
+        case .pen, .pencil:
             return .pen
         case .marker:
             return .marker
-        case .pencil:
-            return .pencil
         case .eraser, .lasso:
             return nil
         }
@@ -208,12 +200,12 @@ struct PaletteToolbar: View {
     private var verticalToolSelector: some View {
         VerticalRetappableSegmentedPicker(
             segments: toolSegments,
-            selectedIndex: ToolKind.allCases.firstIndex(of: palette.tool),
+            selectedIndex: visibleToolKinds.firstIndex(of: palette.tool),
             accessibilityLabel: "도구",
             segmentSize: CGSize(width: ToolbarMetrics.verticalControlWidth,
                                 height: ToolbarMetrics.verticalItemHeight),
-            onSelect: { selectTool(ToolKind.allCases[$0]) },
-            onReselect: { handleToolReselect(ToolKind.allCases[$0]) }
+            onSelect: { selectTool(visibleToolKinds[$0]) },
+            onReselect: { handleToolReselect(visibleToolKinds[$0]) }
         )
         .popover(isPresented: penEditorPresentedBinding,
                  attachmentAnchor: .point(verticalToolPopoverAnchor),
@@ -226,13 +218,6 @@ struct PaletteToolbar: View {
                  attachmentAnchor: .point(verticalMarkerPopoverAnchor),
                  arrowEdge: popoverArrowEdge) {
             drawingToolSettingsEditor(for: .marker)
-                .padding(14)
-                .presentationCompactAdaptation(.popover)
-        }
-        .popover(isPresented: pencilEditorPresentedBinding,
-                 attachmentAnchor: .point(verticalPencilPopoverAnchor),
-                 arrowEdge: popoverArrowEdge) {
-            drawingToolSettingsEditor(for: .pencil)
                 .padding(14)
                 .presentationCompactAdaptation(.popover)
         }
@@ -270,17 +255,6 @@ struct PaletteToolbar: View {
             get: { activeEditor == .marker },
             set: { isPresented in
                 if !isPresented, activeEditor == .marker {
-                    activeEditor = nil
-                }
-            }
-        )
-    }
-
-    private var pencilEditorPresentedBinding: Binding<Bool> {
-        Binding(
-            get: { activeEditor == .pencil },
-            set: { isPresented in
-                if !isPresented, activeEditor == .pencil {
                     activeEditor = nil
                 }
             }
@@ -345,45 +319,30 @@ struct PaletteToolbar: View {
 
     private var toolPopoverAnchor: UnitPoint {
         segmentAnchorPoint(
-            index: ToolKind.allCases.firstIndex(of: .pen),
-            count: ToolKind.allCases.count
+            index: visibleToolKinds.firstIndex(of: .pen),
+            count: visibleToolKinds.count
         )
     }
 
     private var verticalToolPopoverAnchor: UnitPoint {
         segmentAnchorPoint(
-            index: ToolKind.allCases.firstIndex(of: .pen),
-            count: ToolKind.allCases.count,
+            index: visibleToolKinds.firstIndex(of: .pen),
+            count: visibleToolKinds.count,
             axis: .vertical
         )
     }
 
     private var markerPopoverAnchor: UnitPoint {
         segmentAnchorPoint(
-            index: ToolKind.allCases.firstIndex(of: .marker),
-            count: ToolKind.allCases.count
+            index: visibleToolKinds.firstIndex(of: .marker),
+            count: visibleToolKinds.count
         )
     }
 
     private var verticalMarkerPopoverAnchor: UnitPoint {
         segmentAnchorPoint(
-            index: ToolKind.allCases.firstIndex(of: .marker),
-            count: ToolKind.allCases.count,
-            axis: .vertical
-        )
-    }
-
-    private var pencilPopoverAnchor: UnitPoint {
-        segmentAnchorPoint(
-            index: ToolKind.allCases.firstIndex(of: .pencil),
-            count: ToolKind.allCases.count
-        )
-    }
-
-    private var verticalPencilPopoverAnchor: UnitPoint {
-        segmentAnchorPoint(
-            index: ToolKind.allCases.firstIndex(of: .pencil),
-            count: ToolKind.allCases.count,
+            index: visibleToolKinds.firstIndex(of: .marker),
+            count: visibleToolKinds.count,
             axis: .vertical
         )
     }
@@ -1470,7 +1429,7 @@ private struct DrawingToolSettingsEditor: View {
 
             widthSection
             pressureSection
-            if tool == .pencil {
+            if tool == .pen, penKind == .pencil {
                 textureStyleSection
                 textureSection
             }
@@ -1520,7 +1479,7 @@ private struct DrawingToolSettingsEditor: View {
                     } label: {
                         penKindGlyph(kind)
                             .foregroundStyle(penKind == kind ? Color.Ink.primary : Color.Ink.secondary)
-                            .frame(width: compactLayout ? 42 : 54, height: 32)
+                            .frame(width: compactLayout ? 38 : 46, height: 32)
                             .background(
                                 Color.Surface.fill,
                                 in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
@@ -1743,7 +1702,7 @@ private struct DrawingToolSettingsEditor: View {
     }
 
     private var editorWidth: CGFloat {
-        compactLayout ? 228 : 260
+        compactLayout ? 228 : 280
     }
 
     private var visiblePresetColors: [Color] {

@@ -90,6 +90,7 @@ enum PenKind: String, CaseIterable, Identifiable, Codable {
     case gelPen
     case fountainPen
     case brushPen
+    case pencil
 
     var id: String { rawValue }
 
@@ -99,6 +100,7 @@ enum PenKind: String, CaseIterable, Identifiable, Codable {
         case .gelPen:      return "젤펜"
         case .fountainPen: return "만년필"
         case .brushPen:    return "붓펜"
+        case .pencil:      return "연필"
         }
     }
 
@@ -108,6 +110,7 @@ enum PenKind: String, CaseIterable, Identifiable, Codable {
         case .gelPen:      return "scribble.variable"
         case .fountainPen: return "pencil.tip"
         case .brushPen:    return "paintbrush.pointed"
+        case .pencil:      return "pencil"
         }
     }
 
@@ -121,6 +124,7 @@ enum PenKind: String, CaseIterable, Identifiable, Codable {
         case .gelPen:      return .gelPen
         case .fountainPen: return .fountainPen
         case .brushPen:    return .brushPen
+        case .pencil:      return .pencil
         }
     }
 
@@ -130,6 +134,7 @@ enum PenKind: String, CaseIterable, Identifiable, Codable {
         case .gelPen:      return 4
         case .fountainPen: return 5
         case .brushPen:    return 7
+        case .pencil:      return 3
         }
     }
 
@@ -139,6 +144,7 @@ enum PenKind: String, CaseIterable, Identifiable, Codable {
         case .gelPen:      return 0.1...16
         case .fountainPen: return 0.1...18
         case .brushPen:    return 0.1...28
+        case .pencil:      return 0.1...12
         }
     }
 
@@ -148,6 +154,7 @@ enum PenKind: String, CaseIterable, Identifiable, Codable {
         case .gelPen:      return [2, 4, 8, 12, 15]
         case .fountainPen: return [2, 5, 9, 13, 17]
         case .brushPen:    return [4, 7, 14, 21, 27]
+        case .pencil:      return [1, 3, 5, 8, 11]
         }
     }
 
@@ -157,6 +164,7 @@ enum PenKind: String, CaseIterable, Identifiable, Codable {
         case .gelPen:      return .soft
         case .fountainPen: return .medium
         case .brushPen:    return .rigid
+        case .pencil:      return .rigid
         }
     }
 }
@@ -467,7 +475,7 @@ final class PaletteState {
         case .pen:
             return toolSettingsByPenKind[penKind] ?? InkToolSettings.defaultSettings(for: inkTool)
         case .pencil:
-            return toolSettingsByTool[.pencil] ?? InkToolSettings.defaultSettings(for: inkTool)
+            return toolSettingsByPenKind[.pencil] ?? toolSettingsByTool[.pencil] ?? InkToolSettings.defaultSettings(for: inkTool)
         case .marker, .highlighter:
             return toolSettingsByTool[.marker] ?? InkToolSettings.defaultSettings(for: inkTool)
         case .eraser:
@@ -529,7 +537,7 @@ final class PaletteState {
         let uiColor = UIColor(color)
         switch tool {
         case .pen:
-            return PKInkingTool(.pen, color: uiColor, width: width)
+            return PKInkingTool(activePKInkType, color: uiColor, width: width)
         case .marker:
             return PKInkingTool(.marker, color: uiColor.withAlphaComponent(0.45), width: width)
         case .pencil:
@@ -538,6 +546,19 @@ final class PaletteState {
             return PKEraserTool(eraserMode.eraserType)
         case .lasso:
             return PKLassoTool()
+        }
+    }
+
+    private var activePKInkType: PKInk.InkType {
+        switch penKind {
+        case .ballpoint, .gelPen:
+            return .pen
+        case .fountainPen:
+            return .fountainPen
+        case .brushPen:
+            return .marker
+        case .pencil:
+            return .pencil
         }
     }
 
@@ -693,6 +714,10 @@ final class PaletteState {
                 widths[kind] = v
             }
         }
+        let hasSavedPencilPenWidth = snap.penWidths?[PenKind.pencil.rawValue] != nil
+        let hasSavedPencilPenSlots = snap.penWidthSlots?[PenKind.pencil.rawValue] != nil
+        let hasSavedPencilPenSettings = snap.toolSettingsByPenKind?[PenKind.pencil.rawValue] != nil
+
         if let savedPenWidths = snap.penWidths {
             for (k, v) in savedPenWidths {
                 if let kind = PenKind(rawValue: k) {
@@ -738,6 +763,17 @@ final class PaletteState {
            let kind = PenKind(rawValue: savedPenKind) {
             penKind = kind
         }
+        if !hasSavedPencilPenSettings, let legacyPencilSettings = toolSettingsByTool[.pencil] {
+            toolSettingsByPenKind[.pencil] = legacyPencilSettings
+        }
+        if !hasSavedPencilPenWidth, let legacyPencilWidth = widths[.pencil] {
+            penWidths[.pencil] = legacyPencilWidth
+        }
+        if !hasSavedPencilPenSlots, let legacyPencilSlots = widthSlots[.pencil] {
+            penWidthSlots[.pencil] = normalizedSlots(legacyPencilSlots,
+                                                     defaults: PenKind.pencil.widthSteps,
+                                                     range: PenKind.pencil.widthRange)
+        }
         if let savedEraserMode = snap.eraserMode,
            let mode = EraserMode(rawValue: savedEraserMode) {
             eraserMode = mode
@@ -750,7 +786,12 @@ final class PaletteState {
             markerSubmode = savedMarkerSubmode
         }
         if let kind = ToolKind(rawValue: snap.tool) {
-            tool = kind
+            if kind == .pencil {
+                penKind = .pencil
+                tool = .pen
+            } else {
+                tool = kind
+            }
             width = currentStoredWidth
         }
         color = snap.color.color

@@ -1376,7 +1376,8 @@ struct PDFKitView: UIViewRepresentable {
                     strokes,
                     page: page,
                     pdfView: hostPDFView,
-                    eraserPreviewIDs: eraserPreviewIDs
+                    eraserPreviewIDs: eraserPreviewIDs,
+                    visibleStrokeCount: strokes.count
                 ))
 
                 if pageIndex == activePageIndex,
@@ -1426,17 +1427,27 @@ struct PDFKitView: UIViewRepresentable {
         private func renderStrokes(_ strokes: [InkStroke],
                                    page: PDFPage,
                                    pdfView: PDFView,
-                                   eraserPreviewIDs: Set<UUID>) -> [RenderedPDFInkStroke] {
-            strokes.compactMap { stroke in
+                                   eraserPreviewIDs: Set<UUID>,
+                                   visibleStrokeCount: Int) -> [RenderedPDFInkStroke] {
+            let detailScale = pencilDetailScale(forVisibleStrokeCount: visibleStrokeCount)
+            return strokes.compactMap { stroke in
                 makeRenderedStroke(
                     stroke,
                     page: page,
                     pdfView: pdfView,
                     cachesOutline: true,
                     isComplete: true,
-                    opacity: eraserPreviewIDs.contains(stroke.id) ? 0.28 : 1
+                    opacity: eraserPreviewIDs.contains(stroke.id) ? 0.28 : 1,
+                    detailScale: detailScale
                 )
             }
+        }
+
+        private func pencilDetailScale(forVisibleStrokeCount count: Int) -> CGFloat {
+            if count > 180 { return 0.22 }
+            if count > 120 { return 0.36 }
+            if count > 70 { return 0.55 }
+            return 1
         }
 
         private func makeRenderedStroke(_ stroke: InkStroke,
@@ -1444,7 +1455,8 @@ struct PDFKitView: UIViewRepresentable {
                                         pdfView: PDFView,
                                         cachesOutline: Bool,
                                         isComplete: Bool,
-                                        opacity: CGFloat = 1) -> RenderedPDFInkStroke? {
+                                        opacity: CGFloat = 1,
+                                        detailScale: CGFloat = 1) -> RenderedPDFInkStroke? {
             guard stroke.tool != .eraser,
                   let pagePath = pageSpaceOutlinePath(
                     for: stroke,
@@ -1471,6 +1483,7 @@ struct PDFKitView: UIViewRepresentable {
                 baseWidth: stroke.baseWidth,
                 renderedWidth: renderedWidth,
                 toolSettings: stroke.toolSettings,
+                detailScale: detailScale,
                 samples: viewSamples
             )
         }
@@ -1950,6 +1963,7 @@ private struct RenderedPDFInkStroke {
     var baseWidth: CGFloat
     var renderedWidth: CGFloat
     var toolSettings: InkToolSettings
+    var detailScale: CGFloat
     var samples: [RenderedPDFInkSample]
 }
 
@@ -2133,13 +2147,16 @@ private final class PDFInkRenderView: UIView {
         let width = max(stroke.renderedWidth, stroke.baseWidth)
         let radius = pencilGrainRadius(width: width, texture: texture, style: style)
         let dotSize = pencilGrainDotSize(width: width, texture: texture, style: style)
-        let spacing = style == .mechanical ? 1 : 2
+        let baseSpacing = style == .mechanical ? 1 : 2
+        let spacing = max(baseSpacing, Int((CGFloat(baseSpacing) / max(stroke.detailScale, 0.18)).rounded()))
         for index in samples.indices {
             guard index % spacing == 0 else { continue }
             let sample = samples[index]
             let pressure = max(0.15, min(sample.force, 1))
             let countFactor = style == .mechanical ? 0.65 + texture * 0.95 : 1.05 + texture * 2.4
-            let dotCount = max(1, min(Int(width * pressure * countFactor), style == .mechanical ? 9 : 18))
+            let maxDots = style == .mechanical ? 9 : 18
+            let scaledMaxDots = max(1, Int((CGFloat(maxDots) * stroke.detailScale).rounded()))
+            let dotCount = max(1, min(Int(width * pressure * countFactor * stroke.detailScale), scaledMaxDots))
             for dot in 0..<dotCount {
                 let seed = CGFloat(((index + 1) * 73 + dot * 29) % 101) / 100
                 let seed2 = CGFloat(((index + 1) * 41 + dot * 53) % 101) / 100
