@@ -2075,7 +2075,7 @@ private final class PDFInkRenderView: UIView {
         let jitterScale = (0.34 + texture * 0.92) * styleJitter
         let graphiteSpread = 0.09 + texture * 0.10
         let passOffset = style == .mechanical ? 0 : CGFloat(pass - 1) * max(0.18, min(width * graphiteSpread, 1.9))
-        let widthFactor = style == .mechanical ? 0.18 + texture * 0.025 : 0.29 + texture * 0.055
+        let widthFactor = style == .mechanical ? 0.32 + texture * 0.04 : 0.29 + texture * 0.055
         context.setLineWidth(max(0.5, min(width * (widthFactor + CGFloat(pass) * 0.038), 3.4)))
         context.beginPath()
         context.move(to: jitteredPencilPoint(first.location,
@@ -2152,7 +2152,7 @@ private final class PDFInkRenderView: UIView {
         case .graphite:
             return 0.20 + texture * 0.24
         case .mechanical:
-            return 0.13 + texture * 0.13
+            return 0
         }
     }
 
@@ -2161,7 +2161,7 @@ private final class PDFInkRenderView: UIView {
         case .graphite:
             return texture < 0.18 ? 3 : 4
         case .mechanical:
-            return 2
+            return 1
         }
     }
 
@@ -2170,7 +2170,7 @@ private final class PDFInkRenderView: UIView {
         case .graphite:
             return (pass == 0 ? 0.30 : 0.18) * (0.86 + texture * 0.42)
         case .mechanical:
-            return (pass == 0 ? 0.34 : 0.16) * (0.88 + texture * 0.22)
+            return 0.46 + texture * 0.16
         }
     }
 
