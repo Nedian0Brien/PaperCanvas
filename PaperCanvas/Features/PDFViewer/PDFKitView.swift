@@ -2021,7 +2021,9 @@ private final class PDFInkRenderView: UIView {
             return
         }
 
-        let texture = stroke.toolSettings.clamped.textureStrength
+        let settings = stroke.toolSettings.clamped
+        let texture = settings.textureStrength
+        let style = settings.textureStyle
         context.saveGState()
         context.addPath(stroke.path)
         context.clip()
@@ -2029,27 +2031,32 @@ private final class PDFInkRenderView: UIView {
         context.setLineCap(.round)
         context.setLineJoin(.round)
 
-        let passCount = texture < 0.12 ? 2 : 3
+        let depositAlpha = stroke.opacity * pencilDepositAlpha(texture: texture, style: style)
+        context.setFillColor(stroke.color.withAlphaComponent(depositAlpha).cgColor)
+        context.addPath(stroke.path)
+        context.fillPath()
+
+        let passCount = pencilPassCount(texture: texture, style: style)
         for pass in 0..<passCount {
-            let baseAlpha: CGFloat = pass == 0 ? 0.20 : 0.12
-            let passAlpha = stroke.opacity * baseAlpha * (0.72 + texture * 0.36)
+            let passAlpha = stroke.opacity * pencilCenterlineAlpha(pass: pass, texture: texture, style: style)
             context.setStrokeColor(stroke.color.withAlphaComponent(passAlpha).cgColor)
-            drawPencilCenterline(stroke, pass: pass, texture: texture, in: context)
+            drawPencilCenterline(stroke, pass: pass, texture: texture, style: style, in: context)
         }
 
         if texture > 0.01 {
-            let grainAlpha = stroke.opacity * (0.05 + texture * 0.11)
+            let grainAlpha = stroke.opacity * pencilGrainAlpha(texture: texture, style: style)
             context.setFillColor(stroke.color.withAlphaComponent(grainAlpha).cgColor)
-            drawPencilGrain(stroke, texture: texture, in: context)
+            drawPencilGrain(stroke, texture: texture, style: style, in: context)
         }
         context.restoreGState()
     }
 
     private func drawPencilFallback(_ stroke: RenderedPDFInkStroke, in context: CGContext) {
-        let texture = stroke.toolSettings.clamped.textureStrength
+        let settings = stroke.toolSettings.clamped
+        let texture = settings.textureStrength
         context.saveGState()
         context.setBlendMode(.multiply)
-        context.setAlpha(stroke.opacity * (0.28 + texture * 0.08))
+        context.setAlpha(stroke.opacity * (0.36 + texture * 0.18))
         context.setFillColor(stroke.color.cgColor)
         context.addPath(stroke.path)
         context.fillPath()
@@ -2059,13 +2066,17 @@ private final class PDFInkRenderView: UIView {
     private func drawPencilCenterline(_ stroke: RenderedPDFInkStroke,
                                       pass: Int,
                                       texture: CGFloat,
+                                      style: InkTextureStyle,
                                       in context: CGContext) {
         let samples = stroke.samples
         guard let first = samples.first else { return }
         let width = max(stroke.renderedWidth, stroke.baseWidth)
-        let jitterScale = 0.25 + texture * 0.75
-        let passOffset = CGFloat(pass - 1) * max(0.25, min(width * (0.08 + texture * 0.08), 1.8))
-        context.setLineWidth(max(0.45, min(width * (0.24 + CGFloat(pass) * 0.045 + texture * 0.03), 2.8)))
+        let styleJitter: CGFloat = style == .mechanical ? 0.38 : 1.0
+        let jitterScale = (0.34 + texture * 0.92) * styleJitter
+        let spread = style == .mechanical ? 0.06 + texture * 0.035 : 0.09 + texture * 0.10
+        let passOffset = CGFloat(pass - (style == .mechanical ? 0 : 1)) * max(0.18, min(width * spread, 1.9))
+        let widthFactor = style == .mechanical ? 0.20 + texture * 0.035 : 0.29 + texture * 0.055
+        context.setLineWidth(max(0.5, min(width * (widthFactor + CGFloat(pass) * 0.038), 3.4)))
         context.beginPath()
         context.move(to: jitteredPencilPoint(first.location,
                                              index: 0,
@@ -2088,7 +2099,7 @@ private final class PDFInkRenderView: UIView {
                                             normal: normal,
                                             offset: passOffset,
                                             scale: jitterScale)
-            if texture > 0.35, (index + pass) % 13 == 0 {
+            if style == .graphite, texture > 0.35, (index + pass) % 13 == 0 {
                 context.strokePath()
                 context.beginPath()
                 context.move(to: point)
@@ -2102,16 +2113,21 @@ private final class PDFInkRenderView: UIView {
         }
     }
 
-    private func drawPencilGrain(_ stroke: RenderedPDFInkStroke, texture: CGFloat, in context: CGContext) {
+    private func drawPencilGrain(_ stroke: RenderedPDFInkStroke,
+                                 texture: CGFloat,
+                                 style: InkTextureStyle,
+                                 in context: CGContext) {
         let samples = stroke.samples
         let width = max(stroke.renderedWidth, stroke.baseWidth)
-        let radius = max(0.8, min(width * (0.36 + texture * 0.32), 8.0))
-        let dotSize = max(0.32, min(width * (0.09 + texture * 0.10), 1.55))
+        let radius = pencilGrainRadius(width: width, texture: texture, style: style)
+        let dotSize = pencilGrainDotSize(width: width, texture: texture, style: style)
+        let spacing = style == .mechanical ? 1 : 2
         for index in samples.indices {
-            guard index % 2 == 0 else { continue }
+            guard index % spacing == 0 else { continue }
             let sample = samples[index]
             let pressure = max(0.15, min(sample.force, 1))
-            let dotCount = max(1, min(Int(width * pressure * (0.45 + texture * 1.45)), 12))
+            let countFactor = style == .mechanical ? 0.65 + texture * 0.95 : 1.05 + texture * 2.4
+            let dotCount = max(1, min(Int(width * pressure * countFactor), style == .mechanical ? 9 : 18))
             for dot in 0..<dotCount {
                 let seed = CGFloat(((index + 1) * 73 + dot * 29) % 101) / 100
                 let seed2 = CGFloat(((index + 1) * 41 + dot * 53) % 101) / 100
@@ -2121,12 +2137,67 @@ private final class PDFInkRenderView: UIView {
                     x: sample.location.x + cos(angle) * distance,
                     y: sample.location.y + sin(angle) * distance
                 )
-                let size = dotSize * (0.75 + seed * (0.35 + texture * 0.45))
+                let sizeJitter = style == .mechanical ? 0.25 + texture * 0.25 : 0.45 + texture * 0.55
+                let size = dotSize * (0.85 + seed * sizeJitter)
                 context.fillEllipse(in: CGRect(x: center.x - size * 0.5,
                                                y: center.y - size * 0.5,
                                                width: size,
                                                height: size))
             }
+        }
+    }
+
+    private func pencilDepositAlpha(texture: CGFloat, style: InkTextureStyle) -> CGFloat {
+        switch style {
+        case .graphite:
+            return 0.20 + texture * 0.24
+        case .mechanical:
+            return 0.13 + texture * 0.13
+        }
+    }
+
+    private func pencilPassCount(texture: CGFloat, style: InkTextureStyle) -> Int {
+        switch style {
+        case .graphite:
+            return texture < 0.18 ? 3 : 4
+        case .mechanical:
+            return texture < 0.55 ? 2 : 3
+        }
+    }
+
+    private func pencilCenterlineAlpha(pass: Int, texture: CGFloat, style: InkTextureStyle) -> CGFloat {
+        switch style {
+        case .graphite:
+            return (pass == 0 ? 0.30 : 0.18) * (0.86 + texture * 0.42)
+        case .mechanical:
+            return (pass == 0 ? 0.34 : 0.16) * (0.88 + texture * 0.22)
+        }
+    }
+
+    private func pencilGrainAlpha(texture: CGFloat, style: InkTextureStyle) -> CGFloat {
+        switch style {
+        case .graphite:
+            return 0.12 + texture * 0.18
+        case .mechanical:
+            return 0.08 + texture * 0.10
+        }
+    }
+
+    private func pencilGrainRadius(width: CGFloat, texture: CGFloat, style: InkTextureStyle) -> CGFloat {
+        switch style {
+        case .graphite:
+            return max(1.0, min(width * (0.46 + texture * 0.38), 9.5))
+        case .mechanical:
+            return max(0.55, min(width * (0.18 + texture * 0.16), 3.2))
+        }
+    }
+
+    private func pencilGrainDotSize(width: CGFloat, texture: CGFloat, style: InkTextureStyle) -> CGFloat {
+        switch style {
+        case .graphite:
+            return max(0.38, min(width * (0.12 + texture * 0.13), 1.95))
+        case .mechanical:
+            return max(0.22, min(width * (0.055 + texture * 0.055), 0.95))
         }
     }
 

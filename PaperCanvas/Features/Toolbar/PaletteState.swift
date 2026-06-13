@@ -443,6 +443,12 @@ final class PaletteState {
         setToolSettings(settings, for: tool)
     }
 
+    func setTextureStyle(_ style: InkTextureStyle, for tool: ToolKind) {
+        var settings = settings(for: tool)
+        settings.textureStyle = style
+        setToolSettings(settings, for: tool)
+    }
+
     func settings(for tool: ToolKind) -> InkToolSettings {
         if tool == .pen {
             return toolSettingsByPenKind[penKind] ?? InkToolSettings.defaultSettings(for: penKind.inkTool)

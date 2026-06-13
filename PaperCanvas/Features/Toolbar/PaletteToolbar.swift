@@ -297,6 +297,7 @@ struct PaletteToolbar: View {
             presetColors: palette.presetColors,
             pressureSensitivity: pressureSensitivityBinding(for: tool),
             textureStrength: textureStrengthBinding(for: tool),
+            textureStyle: textureStyleBinding(for: tool),
             markerSubmode: palette.markerSubmode,
             onSelectPenKind: { palette.setPenKind($0) },
             onSetMarkerSubmode: { palette.setMarkerSubmode($0) }
@@ -328,6 +329,13 @@ struct PaletteToolbar: View {
         Binding(
             get: { palette.settings(for: tool).textureStrength },
             set: { palette.setTextureStrength($0, for: tool) }
+        )
+    }
+
+    private func textureStyleBinding(for tool: ToolKind) -> Binding<InkTextureStyle> {
+        Binding(
+            get: { palette.settings(for: tool).textureStyle },
+            set: { palette.setTextureStyle($0, for: tool) }
         )
     }
 
@@ -1440,6 +1448,7 @@ private struct DrawingToolSettingsEditor: View {
     let presetColors: [Color]
     @Binding var pressureSensitivity: CGFloat
     @Binding var textureStrength: CGFloat
+    @Binding var textureStyle: InkTextureStyle
     let markerSubmode: MarkerSubmode
     let onSelectPenKind: (PenKind) -> Void
     let onSetMarkerSubmode: (MarkerSubmode) -> Void
@@ -1462,6 +1471,7 @@ private struct DrawingToolSettingsEditor: View {
             widthSection
             pressureSection
             if tool == .pencil {
+                textureStyleSection
                 textureSection
             }
             colorSection
@@ -1592,10 +1602,41 @@ private struct DrawingToolSettingsEditor: View {
         }
     }
 
+    private var textureStyleSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("질감 종류")
+            HStack(spacing: 6) {
+                ForEach(InkTextureStyle.allCases, id: \.self) { style in
+                    Button {
+                        textureStyle = style
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        Text(style.label)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(textureStyle == style ? Color.Ink.primary : Color.Ink.secondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 32)
+                            .background(
+                                Color.Surface.fill,
+                                in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Radius.s, style: .continuous)
+                                    .stroke(textureStyle == style ? Color.accentColor : Color.Rule.hairline,
+                                            lineWidth: textureStyle == style ? 2 : 0.8)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(style.label)
+                }
+            }
+        }
+    }
+
     private var textureSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                sectionTitle("질감")
+                sectionTitle("질감 강도")
                 Spacer(minLength: 8)
                 Text(String(format: "%.2f", Double(textureStrength)))
                     .font(.system(size: 12, weight: .semibold))

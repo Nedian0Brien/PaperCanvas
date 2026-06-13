@@ -13,14 +13,35 @@ enum InkTool: Int, Codable, Sendable {
     case brushPen = 7
 }
 
+enum InkTextureStyle: String, CaseIterable, Codable, Sendable {
+    case graphite
+    case mechanical
+
+    var label: String {
+        switch self {
+        case .graphite: return "흑연"
+        case .mechanical: return "샤프"
+        }
+    }
+}
+
 struct InkToolSettings: Codable, Equatable, Sendable {
     var pressureSensitivity: CGFloat
     var textureStrength: CGFloat
+    var textureStyle: InkTextureStyle
+
+    init(pressureSensitivity: CGFloat,
+         textureStrength: CGFloat,
+         textureStyle: InkTextureStyle = .graphite) {
+        self.pressureSensitivity = pressureSensitivity
+        self.textureStrength = textureStrength
+        self.textureStyle = textureStyle
+    }
 
     static func defaultSettings(for tool: InkTool) -> InkToolSettings {
         switch tool {
         case .pencil:
-            return InkToolSettings(pressureSensitivity: 1.0, textureStrength: 1.0)
+            return InkToolSettings(pressureSensitivity: 1.0, textureStrength: 1.0, textureStyle: .graphite)
         case .pen, .gelPen, .fountainPen:
             return InkToolSettings(pressureSensitivity: 1.0, textureStrength: 0.0)
         case .brushPen:
@@ -35,8 +56,22 @@ struct InkToolSettings: Codable, Equatable, Sendable {
     var clamped: InkToolSettings {
         InkToolSettings(
             pressureSensitivity: min(max(pressureSensitivity, 0), 2),
-            textureStrength: min(max(textureStrength, 0), 1)
+            textureStrength: min(max(textureStrength, 0), 1),
+            textureStyle: textureStyle
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pressureSensitivity
+        case textureStrength
+        case textureStyle
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pressureSensitivity = try container.decode(CGFloat.self, forKey: .pressureSensitivity)
+        textureStrength = try container.decode(CGFloat.self, forKey: .textureStrength)
+        textureStyle = try container.decodeIfPresent(InkTextureStyle.self, forKey: .textureStyle) ?? .graphite
     }
 }
 
