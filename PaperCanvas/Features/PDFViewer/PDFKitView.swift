@@ -2099,10 +2099,22 @@ private final class PDFInkRenderView: UIView {
                                             normal: normal,
                                             offset: passOffset,
                                             scale: jitterScale)
-            if style == .graphite, texture > 0.35, (index + pass) % 13 == 0 {
+            if style == .mechanical {
+                let gapSeed = ((index + 1) * 37 + pass * 11) % 23
+                if gapSeed == 0 || gapSeed == 7 {
+                    if drewSegment { context.strokePath() }
+                    context.beginPath()
+                    context.move(to: point)
+                    drewSegment = false
+                } else {
+                    context.addLine(to: point)
+                    drewSegment = true
+                }
+            } else if texture > 0.35, (index + pass) % 13 == 0 {
                 context.strokePath()
                 context.beginPath()
                 context.move(to: point)
+                drewSegment = false
             } else {
                 context.addLine(to: point)
                 drewSegment = true
@@ -2137,12 +2149,23 @@ private final class PDFInkRenderView: UIView {
                     x: sample.location.x + cos(angle) * distance,
                     y: sample.location.y + sin(angle) * distance
                 )
-                let sizeJitter = style == .mechanical ? 0.25 + texture * 0.25 : 0.45 + texture * 0.55
-                let size = dotSize * (0.85 + seed * sizeJitter)
-                context.fillEllipse(in: CGRect(x: center.x - size * 0.5,
-                                               y: center.y - size * 0.5,
-                                               width: size,
-                                               height: size))
+                if style == .mechanical {
+                    let scratchLength = dotSize * (2.2 + texture * 1.6) * (0.65 + seed * 0.6)
+                    let scratchAngle = angle * 0.25 + CGFloat.pi * 0.08
+                    let dx = cos(scratchAngle) * scratchLength * 0.5
+                    let dy = sin(scratchAngle) * scratchLength * 0.5
+                    context.setLineWidth(max(0.22, dotSize * 0.45))
+                    context.beginPath()
+                    context.move(to: CGPoint(x: center.x - dx, y: center.y - dy))
+                    context.addLine(to: CGPoint(x: center.x + dx, y: center.y + dy))
+                    context.strokePath()
+                } else {
+                    let size = dotSize * (0.85 + seed * (0.45 + texture * 0.55))
+                    context.fillEllipse(in: CGRect(x: center.x - size * 0.5,
+                                                   y: center.y - size * 0.5,
+                                                   width: size,
+                                                   height: size))
+                }
             }
         }
     }
@@ -2170,7 +2193,7 @@ private final class PDFInkRenderView: UIView {
         case .graphite:
             return (pass == 0 ? 0.30 : 0.18) * (0.86 + texture * 0.42)
         case .mechanical:
-            return 0.46 + texture * 0.16
+            return 0.32 + texture * 0.12
         }
     }
 
